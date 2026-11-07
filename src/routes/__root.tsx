@@ -84,9 +84,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Signa — AI Sign Language Translator" },
-      { name: "description", content: "Signa turns ASL handshapes into text in real time using your camera." },
-      { property: "og:title", content: "Signa — AI Sign Language Translator" },
+      { title: "SLai — AI Sign Language Translator" },
+      { name: "description", content: "SLai turns ASL handshapes into text in real time using your camera." },
+      { property: "og:title", content: "SLai — AI Sign Language Translator" },
       { property: "og:description", content: "Making every conversation possible." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

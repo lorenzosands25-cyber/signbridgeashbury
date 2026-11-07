@@ -7,9 +7,9 @@ import { MOTION_SIGNS } from "@/lib/asl/motion";
 export const Route = createFileRoute("/learn")({
   head: () => ({
     meta: [
-      { title: "Learn ASL — Signa" },
+      { title: "Learn ASL — SLai" },
       { name: "description", content: "Beginner ASL lessons: greetings, phrases, numbers and the alphabet, with practice." },
-      { property: "og:title", content: "Learn ASL — Signa" },
+      { property: "og:title", content: "Learn ASL — SLai" },
       { property: "og:description", content: "Beginner-friendly American Sign Language lessons." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },

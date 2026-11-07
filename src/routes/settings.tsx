@@ -8,10 +8,10 @@ import { defaultSettings, useHistory, useSettings } from "@/lib/store";
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
-      { title: "Settings — Signa" },
-      { name: "description", content: "Camera, translation, text size, theme and privacy settings for Signa." },
-      { property: "og:title", content: "Settings — Signa" },
-      { property: "og:description", content: "Customize Signa." },
+      { title: "Settings — SLai" },
+      { name: "description", content: "Camera, translation, text size, theme and privacy settings for SLai." },
+      { property: "og:title", content: "Settings — SLai" },
+      { property: "og:description", content: "Customize SLai." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

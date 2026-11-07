@@ -4,9 +4,9 @@ import { ArrowRight, Brain, Camera, Hand, History, ScanText, Zap } from "lucide-
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Signa — Communication without barriers" },
+      { title: "SLai — Communication without barriers" },
       { name: "description", content: "Turn ASL signs into words in real time with your phone or computer camera." },
-      { property: "og:title", content: "Signa — Communication without barriers" },
+      { property: "og:title", content: "SLai — Communication without barriers" },
       { property: "og:description", content: "Turn sign language into words. Understand more, connect better." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
