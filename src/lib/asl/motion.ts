@@ -10,7 +10,7 @@ export type Pt = { x: number; y: number };
 /** Body reference frame for one video frame, in pixel-like units. */
 export type Body = { sw: number; mouth: Pt; forehead: Pt; shoulderMid: Pt };
 
-export type Frame = { t: number; shape: Shape; palm: Pt; tip: Pt; indexTip: Pt; body: Body; palmNormal?: { x: number; y: number; z: number }; thumbUp?: boolean };
+export type Frame = { t: number; shape: Shape; shapeConfidence?: number; palm: Pt; tip: Pt; indexTip: Pt; body: Body; palmNormal?: { x: number; y: number; z: number }; thumbUp?: boolean };
 
 export type MotionResult = { label: string; confidence: number } | null;
 
@@ -42,8 +42,24 @@ export function inBodyZone(f: Frame) {
 }
 
 export function detectMotionSign(fs: Frame[]): MotionResult {
+  const result = matchMotion(fs);
+  if (!result) return null;
+  return { ...result, confidence: Math.min(result.confidence, ...fs.map((f) => f.shapeConfidence ?? 1)) };
+}
+
+/** Recent body-relative travel suppresses static letter commits, not motion matching. */
+export function isMoving(fs: Frame[]): boolean {
+  const last = fs[fs.length - 1];
+  if (!last) return false;
+  const recent = fs.filter((f) => last.t - f.t <= 250);
+  const x = recent.map((f) => (f.palm.x - f.body.shoulderMid.x) / f.body.sw);
+  const y = recent.map((f) => (f.palm.y - f.body.shoulderMid.y) / f.body.sw);
+  return x.length > 1 && Math.hypot(Math.max(...x) - Math.min(...x), Math.max(...y) - Math.min(...y)) > 0.04;
+}
+
+function matchMotion(fs: Frame[]): MotionResult {
   const first = fs[0], last = fs[fs.length - 1];
-  if (fs.length < 12 || !first || !last || last.t - first.t < 600 || fs.some((f) => !Number.isFinite(f.body.sw) || f.body.sw <= 0)) return null;
+  if (fs.length < 6 || !first || !last || last.t - first.t < 600 || fs.some((f, i) => !Number.isFinite(f.t) || !Number.isFinite(f.body.sw) || f.body.sw <= 0 || (f.shapeConfidence !== undefined && (!Number.isFinite(f.shapeConfidence) || f.shapeConfidence <= 0.65)) || [f.palm, f.tip, f.indexTip, f.body.shoulderMid, f.body.mouth, f.body.forehead].some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)) || (i > 0 && (f.t <= (fs[i - 1]?.t ?? f.t) || f.t - (fs[i - 1]?.t ?? f.t) > 500)))) return null;
   const n = fs.length;
   const head = fs.slice(0, Math.ceil(n * 0.3));
   const tail = fs.slice(Math.floor(n * 0.7));
@@ -78,20 +94,20 @@ export function detectMotionSign(fs: Frame[]): MotionResult {
     return { label: "Me", confidence: 0.8 };
   }
   // YES: fist nodding up and down in front of the body.
-  if (frac(fs, (f) => f.shape === "fist" && !onChest(f)) > 0.7) {
-    let turns = 0, dir = 0, amp = 0;
+  if (frac(fs, (f) => f.shape === "fist") > 0.7) {
+    let turns = 0, dir = 0;
+    let extreme = ys[0] ?? 0;
     for (let i = 1; i < n; i++) {
-      const current = fs[i], previous = fs[i - 1];
-      if (!current || !previous) continue;
-      const dy = current.palm.y - previous.palm.y;
-      const sw = current.body.sw;
-      if (Math.abs(dy) < 0.01 * sw) continue;
-      const s = Math.sign(dy);
-      if (dir && s !== dir) turns++;
-      dir = s;
-      amp = Math.max(amp, Math.abs(current.palm.y - first.palm.y) / sw);
+      const y = ys[i];
+      if (y === undefined) continue;
+      if (!dir) {
+        if (Math.abs(y - extreme) >= 0.03) { dir = Math.sign(y - extreme); extreme = y; }
+      } else if ((y - extreme) * dir >= 0) extreme = y;
+      else if (Math.abs(y - extreme) >= 0.03) { turns++; dir = -dir; extreme = y; }
     }
-    if (turns >= 2 && amp > 0.08) return { label: "Yes", confidence: 0.8 };
+    const vertical = Math.max(...ys) - Math.min(...ys);
+    const horizontal = Math.max(...xs) - Math.min(...xs);
+    if (turns >= 2 && vertical > 0.08 && horizontal < vertical * 0.6) return { label: "Yes", confidence: 0.8 };
   }
   return null;
 }
