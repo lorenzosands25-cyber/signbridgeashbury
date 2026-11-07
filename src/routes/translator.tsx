@@ -15,9 +15,9 @@ export const Route = createFileRoute("/translator")({
     typeof s['practice'] === "string" ? { practice: s['practice'] } : {},
   head: () => ({
     meta: [
-      { title: "Live ASL Translator — Signa" },
-      { name: "description", content: "Read supported ASL signs, hear translations with ElevenLabs, and type a response with Signa." },
-      { property: "og:title", content: "Live ASL Translator — Signa" },
+      { title: "Live ASL Translator — SLai" },
+      { name: "description", content: "Read supported ASL signs, hear translations with ElevenLabs, and type a response with SLai." },
+      { property: "og:title", content: "Live ASL Translator — SLai" },
       { property: "og:description", content: "Live ASL text and spoken translations, with typed replies." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -318,7 +318,7 @@ function Translator() {
                 <div>
                   <p className="text-xl font-bold">{cam === "off" ? "Turn on your camera" : "Camera unavailable"}</p>
                   <p className="mt-1 max-w-xs text-sm opacity-90">
-                    {cam === "off" ? "Signa needs camera access to see signs. Video is processed on your device and never uploaded." : errMsg}
+                    {cam === "off" ? "SLai needs camera access to see signs. Video is processed on your device and never uploaded." : errMsg}
                   </p>
                 </div>
                 <button onClick={() => start()} className="h-12 rounded-2xl bg-card px-6 font-bold text-foreground shadow-card transition active:scale-95">
@@ -394,9 +394,9 @@ function Translator() {
           <Textarea id="conversation-response" value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Type your reply…" className="min-h-40 resize-y rounded-2xl bg-muted/40 text-2xl font-semibold leading-relaxed md:text-2xl" />
         </section>
         <section className="rounded-3xl border border-border p-5 text-sm">
-          <p className="font-bold">What Signa recognizes today</p>
+          <p className="font-bold">What SLai recognizes today</p>
           <p className="mt-1 text-muted-foreground">
-            Signa now tracks your body too, so it knows when a hand is at your forehead, chin or chest and how it moves. It understands the word signs below plus fingerspelled letters — not yet all of ASL, full grammar or facial expressions. Keep your head and shoulders in view for word signs.
+            SLai now tracks your body too, so it knows when a hand is at your forehead, chin or chest and how it moves. It understands the word signs below plus fingerspelled letters — not yet all of ASL, full grammar or facial expressions. Keep your head and shoulders in view for word signs.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {MOTION_SIGNS.map((s) => <span key={s} className="rounded-lg bg-secondary/20 px-2 py-1 text-xs font-bold text-foreground">{s}</span>)}
