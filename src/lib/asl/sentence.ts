@@ -1,37 +1,51 @@
 import type { Classification } from "./classifier";
 
 // Turns a noisy per-frame stream of classifications into committed text.
-// A sign is only committed after it is held steadily for `stableFrames` frames
-// with an average confidence at or above `threshold` — never on uncertain input.
+// All signs share a continuous, wall-clock confirmation gate.
+export const MIN_SIGN_CONFIDENCE = 0.7;
+export const SIGN_HOLD_MS = 2000;
+const MAX_SAMPLE_GAP_MS = 500;
 export type BuilderStatus = "idle" | "tracking" | "recognized" | "low-confidence" | "unrecognized";
 
 export class SentenceBuilder {
   text = "";
   confidences: number[] = [];
-  private run: { label: string | null; n: number; sum: number } = { label: null, n: 0, sum: 0 };
+  private run: { key: string; since: number; last: number; n: number; sum: number } | null = null;
   private lastCommitted: string | null = null;
   private absentSince: number | null = null;
 
-  constructor(public threshold = 0.75, public stableFrames = 10, public spaceAfterMs = 1200) {}
+  constructor(public threshold = MIN_SIGN_CONFIDENCE, public holdMs = SIGN_HOLD_MS, public spaceAfterMs = 1200) {}
 
-  push(c: Classification | null, now: number): { status: BuilderStatus; committed?: string } {
+  resetTracking() {
+    this.run = null;
+    this.lastCommitted = null;
+    this.absentSince = null;
+  }
+
+  push(c: Classification | null, now: number, source = "default"): { status: BuilderStatus; committed?: string } {
     if (!c) {
       if (this.absentSince === null) this.absentSince = now;
-      this.run = { label: null, n: 0, sum: 0 };
+      this.run = null;
       this.lastCommitted = null;
       if (now - this.absentSince > this.spaceAfterMs && this.text && !this.text.endsWith(" ")) this.text += " ";
       return { status: "idle" };
     }
     this.absentSince = null;
-    if (c.label !== this.run.label) this.run = { label: c.label, n: 0, sum: 0 };
+    if (!c.label || !Number.isFinite(c.confidence) || c.confidence < Math.max(MIN_SIGN_CONFIDENCE, this.threshold)) {
+      this.run = null;
+      return { status: c.label ? "low-confidence" : "unrecognized" };
+    }
+    const key = `${source}:${c.kind}:${c.label}`;
+    if (!this.run || this.run.key !== key || now - this.run.last > MAX_SAMPLE_GAP_MS || now < this.run.last) {
+      this.run = { key, since: now, last: now, n: 0, sum: 0 };
+    }
+    this.run.last = now;
     this.run.n++;
     this.run.sum += c.confidence;
-    if (!c.label) return { status: "unrecognized" };
     const avg = this.run.sum / this.run.n;
-    if (this.run.n < this.stableFrames) return { status: "tracking" };
-    if (avg < this.threshold) return { status: "low-confidence" };
-    if (this.lastCommitted === c.label) return { status: "recognized" };
-    this.lastCommitted = c.label;
+    if (now - this.run.since <= Math.max(SIGN_HOLD_MS, this.holdMs)) return { status: "tracking" };
+    if (this.lastCommitted === key) return { status: "recognized" };
+    this.lastCommitted = key;
     if (c.kind === "word") {
       this.text = (this.text.trimEnd() + " " + c.label + " ").trimStart();
     } else {
@@ -41,16 +55,9 @@ export class SentenceBuilder {
     return { status: "recognized", committed: c.label };
   }
 
-  private lastWordAt = new Map<string, number>();
-  /** Commit a whole word from the movement detector (already confidence-checked). */
-  commitWord(label: string, confidence: number, now: number): boolean {
-    if (confidence < this.threshold) return false;
-    if (now - (this.lastWordAt.get(label) ?? -1e9) < 1500) return false;
-    this.lastWordAt.set(label, now);
-    this.text = (this.text.trimEnd() + " " + label + " ").trimStart();
-    this.confidences.push(confidence);
-    this.run = { label: null, n: 0, sum: 0 };
-    return true;
+  /** Whole words cannot bypass the same confidence/duration gate as letters. */
+  commitWord(label: string, confidence: number, now: number, source = "default"): boolean {
+    return !!this.push({ label, kind: "word", confidence }, now, source).committed;
   }
 
   /** Allow repeating the same letter (e.g. "LL") by lowering the hand briefly. */
@@ -61,6 +68,6 @@ export class SentenceBuilder {
   clear() {
     this.text = "";
     this.confidences = [];
-    this.lastCommitted = null;
+    this.resetTracking();
   }
 }
