@@ -294,7 +294,7 @@ function Translator() {
         } else { tracksRef.current.clear(); pairRef.current = []; }
         if (experimental && target) {
           const left = frameBySide.get("Left"), right = frameBySide.get("Right");
-          if (left && right) {
+          if (left && right && (left.shapeConfidence ?? 0) >= Math.max(0.7, settings.threshold) && (right.shapeConfidence ?? 0) >= Math.max(0.7, settings.threshold)) {
             pairRef.current = updateMotionWindow(pairRef.current, { t: now, left, right }, (frame) => `${frame.left.shape}:${frame.right.shape}`);
           } else pairRef.current = [];
           const match = detectTwoHandSign(pairRef.current, target);
