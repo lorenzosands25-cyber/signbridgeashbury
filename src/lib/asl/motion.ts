@@ -29,7 +29,10 @@ export function zoneOf(p: Pt, b: Body): "forehead" | "chin" | "chest" | "neutral
 const frac = (fs: Frame[], f: (x: Frame) => boolean) => fs.filter(f).length / Math.max(1, fs.length);
 const pathLen = (fs: Frame[], pick: (x: Frame) => Pt) => {
   let s = 0;
-  for (let i = 1; i < fs.length; i++) s += dist(pick(fs[i]!), pick(fs[i - 1]!)) / fs[i]!.body.sw;
+  for (let i = 1; i < fs.length; i++) {
+    const current = fs[i], previous = fs[i - 1];
+    if (current && previous) s += dist(pick(current), pick(previous)) / current.body.sw;
+  }
   return s;
 };
 
@@ -39,31 +42,35 @@ export function inBodyZone(f: Frame) {
 }
 
 export function detectMotionSign(fs: Frame[]): MotionResult {
-  if (fs.length < 12) return null;
+  const first = fs[0], last = fs[fs.length - 1];
+  if (fs.length < 12 || !first || !last || last.t - first.t < 600 || fs.some((f) => !Number.isFinite(f.body.sw) || f.body.sw <= 0)) return null;
   const n = fs.length;
   const head = fs.slice(0, Math.ceil(n * 0.3));
   const tail = fs.slice(Math.floor(n * 0.7));
   const onChest = (f: Frame) => zoneOf(f.palm, f.body) === "chest";
   const travel = pathLen(fs, (f) => f.palm);
+  // Circular chest signs need real two-axis movement, not a resting hand or jitter.
+  const xs = fs.map((f) => (f.palm.x - f.body.shoulderMid.x) / f.body.sw);
+  const ys = fs.map((f) => (f.palm.y - f.body.shoulderMid.y) / f.body.sw);
+  const circular = travel > 0.4 && Math.max(...xs) - Math.min(...xs) > 0.12 && Math.max(...ys) - Math.min(...ys) > 0.12 && dist(first.palm, last.palm) / last.body.sw < travel * 0.65;
 
   // THANK YOU: open hand fingertips at chin, then moves forward/down away from mouth.
   if (frac(head, (f) => f.shape === "open" && zoneOf(f.tip, f.body) === "chin") > 0.5) {
-    const last = tail[tail.length - 1]!;
     if (frac(tail, (f) => f.shape === "open") > 0.5 && dist(last.tip, last.body.mouth) > 0.6 * last.body.sw && last.tip.y > last.body.mouth.y)
       return { label: "Thank you", confidence: 0.88 };
   }
   // HELLO: flat hand at forehead, then moves outward.
   if (frac(head, (f) => f.shape === "open" && zoneOf(f.tip, f.body) === "forehead") > 0.5) {
-    const a = head[0]!, z = tail[tail.length - 1]!;
-    if (Math.abs(z.tip.x - a.tip.x) > 0.5 * z.body.sw && frac(tail, (f) => f.shape === "open") > 0.5)
+    const outward = Math.abs(last.tip.x - last.body.forehead.x) - Math.abs(first.tip.x - first.body.forehead.x);
+    if (outward > 0.5 * last.body.sw && frac(tail, (f) => f.shape === "open") > 0.5)
       return { label: "Hello", confidence: 0.85 };
   }
   // PLEASE: flat hand on chest (usually circling).
-  if (frac(fs, (f) => f.shape === "open" && onChest(f)) > 0.7) {
+  if (frac(fs, (f) => f.shape === "open" && onChest(f)) > 0.7 && circular) {
     return { label: "Please", confidence: Math.min(0.95, 0.76 + Math.min(1, travel / 0.6) * 0.19) };
   }
   // SORRY: fist circling on chest.
-  if (frac(fs, (f) => f.shape === "fist" && onChest(f)) > 0.7 && travel > 0.25) {
+  if (frac(fs, (f) => f.shape === "fist" && onChest(f)) > 0.7 && circular) {
     return { label: "Sorry", confidence: Math.min(0.92, 0.76 + Math.min(1, travel / 0.6) * 0.16) };
   }
   // ME: index finger pointing at own chest.
@@ -74,13 +81,15 @@ export function detectMotionSign(fs: Frame[]): MotionResult {
   if (frac(fs, (f) => f.shape === "fist" && !onChest(f)) > 0.7) {
     let turns = 0, dir = 0, amp = 0;
     for (let i = 1; i < n; i++) {
-      const dy = fs[i]!.palm.y - fs[i - 1]!.palm.y;
-      const sw = fs[i]!.body.sw;
+      const current = fs[i], previous = fs[i - 1];
+      if (!current || !previous) continue;
+      const dy = current.palm.y - previous.palm.y;
+      const sw = current.body.sw;
       if (Math.abs(dy) < 0.01 * sw) continue;
       const s = Math.sign(dy);
       if (dir && s !== dir) turns++;
       dir = s;
-      amp = Math.max(amp, Math.abs(fs[i]!.palm.y - fs[0]!.palm.y) / sw);
+      amp = Math.max(amp, Math.abs(current.palm.y - first.palm.y) / sw);
     }
     if (turns >= 2 && amp > 0.08) return { label: "Yes", confidence: 0.8 };
   }

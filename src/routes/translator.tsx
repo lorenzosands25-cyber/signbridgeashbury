@@ -150,7 +150,8 @@ function Translator() {
             for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
           }
           const side = (res.handedness?.[i]?.[0]?.categoryName as string | undefined) ?? `Hand ${i + 1}`;
-          return { side, cls: classifyHandshape(hand) };
+          // MediaPipe x/z use image width; y uses image height. Equalize axes.
+          return { side, cls: classifyHandshape(hand.map((p) => ({ ...p, x: p.x * W / H, z: (p.z ?? 0) * W / H }))) };
         });
         setHandsView(results);
         // Movement + body-location signs (Please, Thank you, …) per hand.
