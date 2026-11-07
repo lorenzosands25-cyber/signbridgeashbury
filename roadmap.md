@@ -1,3 +1,6 @@
+# Full ASL phrases and movements
+- [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
+
 # Recognition accuracy
 - [x] Require continuous 70% confidence for more than two seconds for every committed sign.
 - [x] Reduce false matches and prevent mixing hand tracks or stale frames.
