@@ -138,6 +138,9 @@ function RootComponent() {
       <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:pb-12">
         <Outlet />
       </main>
+      <footer className="border-t border-border/60 pb-24 pt-6 text-center text-sm text-muted-foreground md:pb-6">
+        Made by Lorenzo S., Roman N., and Allen A.
+      </footer>
       <Toaster position="top-center" />
     </QueryClientProvider>
   );
