@@ -1,6 +1,10 @@
 # Full ASL phrases and movements
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
+# Moving gesture matching
+- [ ] Improve continuous moving-gesture matching, including Yes, with regression tests.
+- [ ] Clarify whether over-65% matches are tentative suggestions or confirmed translations; new request also names 100% for translations.
+
 # Camera and quality upgrade
 - [x] Add camera device selection, quality/mirror/overlay controls, generation-safe cancellation, disconnected/busy camera recovery, and GPU-to-CPU fallback. Browser verified camera startup, quality restart, mirror, stop, and delayed-request cancellation.
 - [x] Bound inference frame dimensions while retaining aspect ratio and every distinct frame, stabilize hand ordering, reuse brightness canvas, and show measured fps/inference time. Headless fake-camera test measured 1 fps / 987 ms; no 10x speedup or real-signing accuracy improvement established. Continuous 70%/over-two-second gate retained and browser verified.
