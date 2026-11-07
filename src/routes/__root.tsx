@@ -10,6 +10,9 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
+import { SiteNav } from "@/components/SiteNav";
+import { Toaster } from "@/components/ui/sonner";
+import { useSettings } from "@/lib/store";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 
@@ -81,11 +84,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "Signa — AI Sign Language Translator" },
+      { name: "description", content: "Signa turns ASL handshapes into text in real time using your camera." },
+      { property: "og:title", content: "Signa — AI Sign Language Translator" },
+      { property: "og:description", content: "Making every conversation possible." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@Lovable" },
@@ -96,6 +98,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         href: appCss,
       },
       { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" },
     ],
   }),
   shellComponent: RootShell,
@@ -120,11 +124,21 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const [settings] = useSettings();
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", settings.theme === "dark");
+    document.documentElement.style.fontSize = `${settings.textScale * 100}%`;
+  }, [settings.theme, settings.textScale]);
 
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <Outlet />
+      <a href="#main" className="sr-only focus:not-sr-only">Skip to content</a>
+      <SiteNav />
+      <main id="main" className="mx-auto max-w-6xl px-4 pb-28 pt-6 md:pb-12">
+        <Outlet />
+      </main>
+      <Toaster position="top-center" />
     </QueryClientProvider>
   );
 }
