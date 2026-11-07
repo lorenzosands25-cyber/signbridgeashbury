@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { SentenceBuilder } from "./sentence";
 
 describe("SentenceBuilder", () => {
+  it("reports only continuous confirmation evidence and clears it on low confidence", () => {
+    const b = new SentenceBuilder();
+    for (let t = 0; t <= 1000; t += 100) b.push({ label: "L", kind: "letter", confidence: 0.7 }, t);
+    expect(b.confirmationProgress).toBe(0.5);
+    b.push({ label: "L", kind: "letter", confidence: 0.69 }, 1100);
+    expect(b.confirmationProgress).toBe(0);
+  });
   it("does not commit a sign below the confidence threshold", () => {
     const b = new SentenceBuilder();
     for (let i = 0; i < 10; i++) b.push({ label: "L", kind: "letter", confidence: 0.5 }, i);

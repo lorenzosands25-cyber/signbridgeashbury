@@ -56,6 +56,10 @@ export class SentenceBuilder {
   }
 
   /** Whole words cannot bypass the same confidence/duration gate as letters. */
+  get confirmationProgress() {
+    return this.run ? Math.min(1, (this.run.last - this.run.since) / Math.max(SIGN_HOLD_MS, this.holdMs)) : 0;
+  }
+
   commitWord(label: string, confidence: number, now: number, source = "default"): boolean {
     return !!this.push({ label, kind: "word", confidence }, now, source).committed;
   }

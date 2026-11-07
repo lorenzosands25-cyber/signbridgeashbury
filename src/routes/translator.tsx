@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
 import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
+import { detectTwoHandSign, type PairedFrame } from "@/lib/asl/two-hand";
+import { advancePractice, practiceSigns, PHRASE_PRACTICES, TWO_HAND_SIGNS } from "@/lib/asl/practice";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -39,6 +41,14 @@ const statusInfo: Record<BuilderStatus, { label: string; cls: string }> = {
 
 function Translator() {
   const { practice } = Route.useSearch();
+  const navigate = Route.useNavigate();
+  const signs = practiceSigns(practice);
+  const [practiceStep, setPracticeStep] = useState(0);
+  const target = signs[practiceStep];
+  const experimental = TWO_HAND_SIGNS.some((s) => s === target);
+  const pairRef = useRef<PairedFrame[]>([]);
+  const [progress, setProgress] = useState(0);
+  const [committedCount, setCommittedCount] = useState(0);
   const [settings, setSettings] = useSettings();
   const [, setHistory] = useHistory();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -48,7 +58,7 @@ function Translator() {
   const poseRef = useRef<any>(null);
   const tracksRef = useRef(new Map<string, Frame[]>());
   const [bodyVisible, setBodyVisible] = useState(false);
-  const [lastWord, setLastWord] = useState<string | null>(null);
+  
   const rafRef = useRef<number>(0);
   const builder = useRef(new SentenceBuilder());
   const [cam, setCam] = useState<CamState>("off");
@@ -67,6 +77,14 @@ function Translator() {
   builder.current.threshold = settings.threshold;
   const mirrored = settings.mirror && settings.facingMode === "user";
 
+  useEffect(() => {
+    setPracticeStep(0);
+    builder.current.resetTracking();
+    tracksRef.current.clear();
+    pairRef.current = [];
+    setProgress(0);
+  }, [practice]);
+
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -77,6 +95,8 @@ function Translator() {
     setHandsView([]);
     builder.current.resetTracking();
     tracksRef.current.clear();
+    pairRef.current = [];
+    setProgress(0);
     smoothRef.current = [];
     identitiesRef.current = "";
     videoTimeRef.current = -1;
@@ -87,6 +107,7 @@ function Translator() {
   const loop = useCallback(() => {
     const v = videoRef.current, c = canvasRef.current, lmk = landmarkerRef.current;
     if (!v || !c || !lmk || !streamRef.current) return;
+    setProgress(builder.current.confirmationProgress);
     if (v.readyState >= 2 && v.currentTime !== videoTimeRef.current) {
       videoTimeRef.current = v.currentTime;
       const now = performance.now();
@@ -101,6 +122,7 @@ function Translator() {
       if (identitiesRef.current !== identities) {
         smoothRef.current = [];
         tracksRef.current.clear();
+        pairRef.current = [];
         builder.current.resetTracking();
         identitiesRef.current = identities;
       }
@@ -157,6 +179,7 @@ function Translator() {
         // Movement + body-location signs (Please, Thank you, …) per hand.
         let motionHit: { label: string; confidence: number; source: string } | null = null;
         let anyInZone = false;
+        const frameBySide = new Map<string, Frame>();
         if (body) {
           const seen = new Set<string>();
           hands.forEach((hand, i) => {
@@ -169,7 +192,17 @@ function Translator() {
             const shape: Shape = l === "B" || l === "5" ? "open" : l === "A" || l === "S" ? "fist" : l === "D" ? "index" : "other";
             const palmIdx = [0, 5, 9, 13, 17];
             const palm = { x: palmIdx.reduce((a, j) => a + (hand[j]?.x ?? 0), 0) / 5 * W, y: palmIdx.reduce((a, j) => a + (hand[j]?.y ?? 0), 0) / 5 * H };
-            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body };
+            const a = hand[0], b = hand[5], d = hand[17], thumb = hand[4], thumbJoint = hand[2];
+            let palmNormal: Frame["palmNormal"];
+            if (a && b && d) {
+              const ux = (b.x - a.x) * W, uy = (b.y - a.y) * H, uz = ((b.z ?? 0) - (a.z ?? 0)) * W;
+              const vx = (d.x - a.x) * W, vy = (d.y - a.y) * H, vz = ((d.z ?? 0) - (a.z ?? 0)) * W;
+              const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+              const length = Math.hypot(nx, ny, nz);
+              if (length > 0) palmNormal = { x: nx / length, y: ny / length, z: nz / length };
+            }
+            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body, palmNormal, thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
+            frameBySide.set(result.side, f);
             const tr = (tracksRef.current.get(key) ?? []).filter((x) => now - x.t < 1200);
             tr.push(f);
             tracksRef.current.set(key, tr);
@@ -178,7 +211,26 @@ function Translator() {
             if (m && (!motionHit || m.confidence > motionHit.confidence)) motionHit = { ...m, source: key };
           });
           for (const k of tracksRef.current.keys()) if (!seen.has(k)) tracksRef.current.delete(k);
-        } else tracksRef.current.clear();
+        } else { tracksRef.current.clear(); pairRef.current = []; }
+        if (experimental && target) {
+          const left = frameBySide.get("Left"), right = frameBySide.get("Right");
+          if (left && right) {
+            pairRef.current = pairRef.current.filter((f) => now - f.t < 1200);
+            pairRef.current.push({ t: now, left, right });
+          } else pairRef.current = [];
+          const match = detectTwoHandSign(pairRef.current, target);
+          const candidate: Classification = { label: match?.label ?? null, kind: "word", confidence: match?.confidence ?? 0 };
+          setCurrent(candidate);
+          const r = builder.current.push(candidate, now, "guided-pair");
+          setStatus(r.status);
+          if (r.committed) {
+            setText(builder.current.text);
+            setCommittedCount((n) => n + 1);
+            setPracticeStep((step) => advancePractice(signs, step, r.committed ?? ""));
+          }
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
         if (motionHit) {
           const mh = motionHit as { label: string; confidence: number; source: string };
           const candidate: Classification = { label: mh.label, kind: "word", confidence: mh.confidence };
@@ -187,7 +239,8 @@ function Translator() {
           setStatus(r.status);
           if (r.committed) {
             setText(builder.current.text);
-            setLastWord(mh.label);
+            setCommittedCount((n) => n + 1);
+            setPracticeStep((step) => advancePractice(signs, step, mh.label));
           }
           rafRef.current = requestAnimationFrame(loop);
           return;
@@ -206,7 +259,11 @@ function Translator() {
         setCurrent(best.cls);
         const r = builder.current.push(best.cls, now, best.side);
         setStatus(r.status);
-        if (r.committed) setText(builder.current.text);
+        if (r.committed) {
+          setText(builder.current.text);
+          setCommittedCount((n) => n + 1);
+          setPracticeStep((step) => advancePractice(signs, step, r.committed ?? ""));
+        }
       } else {
         setHandsView([]);
         setCurrent(null);
@@ -226,7 +283,7 @@ function Translator() {
       }
     }
     rafRef.current = requestAnimationFrame(loop);
-  }, [settings.showLandmarks, settings.threshold, text]);
+  }, [settings.showLandmarks, settings.threshold, text, practice, practiceStep]);
 
   const start = useCallback(async (facing = settings.facingMode) => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -235,6 +292,8 @@ function Translator() {
     cancelAnimationFrame(rafRef.current);
     builder.current.resetTracking();
     tracksRef.current.clear();
+    pairRef.current = [];
+    setProgress(0);
     smoothRef.current = [];
     identitiesRef.current = "";
     videoTimeRef.current = -1;
@@ -290,7 +349,7 @@ function Translator() {
     if (cam === "on") start(next);
   };
 
-  const clear = () => { builder.current.clear(); setText(""); };
+  const clear = () => { builder.current.clear(); tracksRef.current.clear(); pairRef.current = []; setText(""); setProgress(0); setCommittedCount(0); };
   const copy = async () => { await navigator.clipboard.writeText(text.trim()); toast.success("Copied to clipboard"); };
   const save = () => {
     setHistory((h) => [{ id: crypto.randomUUID(), text: text.trim(), createdAt: Date.now(), confidence: builder.current.averageConfidence, favorite: false }, ...h]);
@@ -302,145 +361,87 @@ function Translator() {
   const conf = current?.label ? Math.round(current.confidence * 100) : 0;
 
   return (
-    <div className="mx-auto grid max-w-5xl gap-5 lg:grid-cols-[1.2fr_1fr]">
-      <h1 className="sr-only">Live ASL translator</h1>
-      <section aria-label="Camera" className="relative aspect-[3/4] overflow-hidden rounded-[2rem] bg-foreground shadow-soft lg:aspect-[4/5]">
-        <video ref={videoRef} playsInline muted className={`absolute inset-0 h-full w-full object-cover ${mirrored ? "-scale-x-100" : ""} ${active ? "" : "opacity-0"}`} />
-        <canvas ref={canvasRef} aria-hidden className={`absolute inset-0 h-full w-full object-cover ${mirrored ? "-scale-x-100" : ""}`} />
-
-        {active && (
-          <>
-            <div aria-hidden className="pointer-events-none absolute inset-x-[15%] top-[18%] bottom-[22%] rounded-[2rem] border-2 border-dashed border-accent/70" />
-            <p className="absolute inset-x-0 top-[12%] text-center text-sm font-semibold text-background/90">Keep your hand inside the frame</p>
-            <div className={`absolute left-4 top-4 flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold backdrop-blur ${statusInfo[status].cls}`} role="status" aria-live="polite">
-              <span className="relative flex h-2 w-2"><span className="absolute h-2 w-2 animate-ping rounded-full bg-current opacity-60" /><span className="h-2 w-2 rounded-full bg-current" /></span>
-              {statusInfo[status].label}
-            </div>
-            {handsView.length > 0 && (
-              <div className="absolute right-4 top-4 flex flex-col gap-2" aria-label="Detected hands">
-                {handsView.map((h, i) => (
-                  <div key={i} className="min-w-16 rounded-2xl bg-card px-3 py-1.5 text-center shadow-card">
-                    <div className="text-[10px] font-bold uppercase text-muted-foreground">{h.side}</div>
-                    <div className="text-xl font-extrabold leading-tight">{h.cls.label ?? "?"}</div>
-                    <div className="text-[10px] font-semibold text-muted-foreground">{h.cls.label ? `${Math.round(h.cls.confidence * 100)}%` : "unknown"}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!bodyVisible && (
-              <div className="absolute inset-x-4 bottom-24 rounded-2xl bg-card/90 px-3 py-2 text-center text-sm font-semibold text-foreground">
-                Step back so your head and shoulders are visible for word signs.
-              </div>
-            )}
-            {lowLight && (
-              <div className="absolute inset-x-4 bottom-24 flex items-center gap-2 rounded-2xl bg-warning px-3 py-2 text-sm font-semibold text-foreground">
-                <AlertTriangle className="h-4 w-4" aria-hidden /> It's quite dark — try more light for better accuracy.
-              </div>
-            )}
-          </>
-        )}
-
-        {!active && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-brand p-8 text-center text-primary-foreground">
-            {busy ? (
-              <>
-                <Loader2 className="h-10 w-10 animate-spin" aria-hidden />
-                <p className="font-semibold" role="status">{cam === "requesting" ? "Waiting for camera permission…" : "Loading the hand-tracking AI…"}</p>
-              </>
-            ) : (
-              <>
-                <div className="grid h-20 w-20 place-items-center rounded-3xl bg-background/20">
-                  {cam === "off" ? <Camera className="h-10 w-10" aria-hidden /> : <AlertTriangle className="h-10 w-10" aria-hidden />}
-                </div>
-                <div>
-                  <p className="text-xl font-bold">{cam === "off" ? "Turn on your camera" : "Camera unavailable"}</p>
-                  <p className="mt-1 max-w-xs text-sm opacity-90">
-                    {cam === "off" ? "SignBridge needs camera access to see signs. Video is processed on your device and never uploaded." : errMsg}
-                  </p>
-                </div>
-                <button onClick={() => start()} className="h-12 rounded-2xl bg-card px-6 font-bold text-foreground shadow-card transition active:scale-95">
-                  {cam === "off" ? "Allow camera" : "Try again"}
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        <div className="absolute inset-x-0 bottom-4 flex justify-center gap-3">
-          <button
-            onClick={() => (active ? stop() : start())}
-            disabled={busy}
-            aria-label={active ? "Turn camera off" : "Turn camera on"}
-            className="grid h-14 w-14 place-items-center rounded-full bg-card text-foreground shadow-soft transition active:scale-90 disabled:opacity-50"
-          >
-            {active ? <CameraOff className="h-6 w-6" aria-hidden /> : <Camera className="h-6 w-6" aria-hidden />}
-          </button>
-          <button onClick={switchCamera} aria-label="Switch between front and back camera" className="grid h-14 w-14 place-items-center rounded-full bg-card text-foreground shadow-soft transition active:scale-90">
-            <RefreshCcw className="h-6 w-6" aria-hidden />
-          </button>
+    <div className="mx-auto max-w-6xl space-y-6">
+      <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+        <div>
+          <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase text-primary"><span className="h-2 w-2 rounded-full bg-accent" /> SignBridge · Conversation</p>
+          <h1 className="text-3xl font-extrabold">A conversation, connected.</h1>
         </div>
-      </section>
-
-      <div className="space-y-4">
-        {practice && (
-          <div className="rounded-3xl border-2 border-primary/30 bg-card p-5" role="status">
-            <p className="text-sm font-semibold text-muted-foreground">Practice</p>
-            <p className="text-lg font-bold">Sign "{practice}"</p>
-            <p className={`mt-1 font-semibold ${(current?.label === practice && status === "recognized") || lastWord === practice ? "text-success" : "text-muted-foreground"}`}>
-              {(current?.label === practice && status === "recognized") || lastWord === practice ? <><Check className="mr-1 inline h-4 w-4" aria-hidden />Great — recognized!</> : "Hold the handshape steady in the frame."}
-            </p>
-          </div>
-        )}
-        <section aria-label="Live translation" className="rounded-[2rem] bg-card p-6 shadow-card">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center gap-2 text-xs font-extrabold tracking-widest text-muted-foreground">
-              <span className={`h-2 w-2 rounded-full ${active ? "animate-pulse bg-success" : "bg-muted-foreground"}`} aria-hidden />
-              Live Translation {active ? "· ON" : "· OFF"}
-            </h2>
-            <span className="text-xs font-semibold text-muted-foreground">
-              Confidence: {current?.label ? `${conf}%` : "—"}
-            </span>
-          </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden>
-            <div className="h-full bg-brand transition-all duration-300" style={{ width: `${conf}%` }} />
-          </div>
-          <p className="mt-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">
-            {text.trim() ? text : <span className="text-muted-foreground/60">Recognized signs will appear here…</span>}
-          </p>
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-            <Button variant="ghost" size="icon" onClick={speech.toggle} aria-pressed={speech.enabled} aria-label={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"} title={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"}>
-              {speech.enabled ? <Volume2 aria-hidden /> : <VolumeX aria-hidden />}
-            </Button>
-            <span className="mr-auto text-xs font-semibold text-muted-foreground" role="status">{speech.state === "loading" ? "Preparing voice…" : speech.state === "speaking" ? "Speaking…" : speech.enabled ? "ElevenLabs voice · On" : "ElevenLabs voice · Muted"}</span>
-            <Button variant="ghost" size="icon" disabled={!text.trim()} onClick={speech.replay} aria-label="Play translation" title="Play translation"><Play aria-hidden /></Button>
-            <Button variant="ghost" size="icon" disabled={speech.state === "idle"} onClick={speech.cancel} aria-label="Stop speaking" title="Stop speaking"><Square aria-hidden /></Button>
-          </div>
-          {speech.error && <p className="mt-2 break-words text-sm text-destructive" role="alert">{speech.error}</p>}
-          <p className="mt-1 text-xs text-muted-foreground">When voice is on, translated text is sent to ElevenLabs. Camera video stays on your device.</p>
-          <div className="mt-5 grid grid-cols-3 gap-2">
-            <button onClick={clear} disabled={!text} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-muted font-semibold transition active:scale-95 disabled:opacity-40"><Trash2 className="h-4 w-4" aria-hidden />Clear</button>
-            <button onClick={copy} disabled={!text.trim()} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-muted font-semibold transition active:scale-95 disabled:opacity-40"><Copy className="h-4 w-4" aria-hidden />Copy</button>
-            <button onClick={save} disabled={!text.trim()} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand font-semibold text-primary-foreground transition active:scale-95 disabled:opacity-40"><Save className="h-4 w-4" aria-hidden />Save</button>
-          </div>
-        </section>
-        <section aria-label="Response" className="rounded-[2rem] bg-card p-6 shadow-card">
-          <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xs font-extrabold tracking-widest text-muted-foreground"><label htmlFor="conversation-response">Response</label></h2>
-            <Button variant="ghost" size="icon" disabled={!response} onClick={() => setResponse("")} aria-label="Clear response" title="Clear response"><Trash2 aria-hidden /></Button>
-          </div>
-          <Textarea id="conversation-response" value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Type your reply…" className="min-h-40 resize-y rounded-2xl bg-muted/40 text-2xl font-semibold leading-relaxed md:text-2xl" />
-        </section>
-        <section className="rounded-3xl border border-border p-5 text-sm">
-          <p className="font-bold">What SignBridge recognizes today</p>
-          <p className="mt-1 text-muted-foreground">
-            SignBridge now tracks your body too, so it knows when a hand is at your forehead, chin or chest and how it moves. It understands the word signs below plus fingerspelled letters — not yet all of ASL, full grammar or facial expressions. Keep your head and shoulders in view for word signs.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {MOTION_SIGNS.map((s) => <span key={s} className="rounded-lg bg-secondary/20 px-2 py-1 text-xs font-bold text-foreground">{s}</span>)}
-            {SUPPORTED_SIGNS.map((s) => <span key={s} className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-bold text-primary">{s}</span>)}
-          </div>
-        </section>
+        <div className="flex gap-5 text-xs font-semibold text-muted-foreground">
+          <span className="flex items-center gap-2"><Camera className="h-4 w-4" aria-hidden /> On-device video</span>
+          <span className="flex items-center gap-2"><Check className="h-4 w-4 text-success" aria-hidden /> {committedCount} confirmed</span>
+        </div>
+      </header>
+      <div className="grid items-start gap-6 lg:grid-cols-[1.1fr_1fr]">
+        <div className="min-w-0 space-y-3">
+          <section aria-label="Camera" className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-foreground shadow-soft lg:aspect-[4/5]">
+            <video ref={videoRef} playsInline muted className={`absolute inset-0 h-full w-full object-contain ${mirrored ? "-scale-x-100" : ""} ${active ? "" : "opacity-0"}`} />
+            <canvas ref={canvasRef} aria-hidden className={`absolute inset-0 h-full w-full object-contain ${mirrored ? "-scale-x-100" : ""}`} />
+            {active && <>
+              <div className={`absolute left-3 top-3 flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-bold ${statusInfo[status].cls}`} role="status">
+                <span className="h-2 w-2 rounded-full bg-current" />{statusInfo[status].label}
+              </div>
+              <div className="absolute right-3 top-14 flex gap-2" aria-label="Detected hands">
+                {handsView.map((h) => <div key={h.side} className="rounded-lg bg-card/95 px-3 py-2 text-xs font-bold">{h.side} <span className="text-muted-foreground">· tracked</span></div>)}
+              </div>
+              {(!bodyVisible || lowLight) && <div className="absolute inset-x-3 bottom-20 rounded-lg bg-card/95 px-3 py-2 text-center text-xs font-semibold">{lowLight ? "Low light" : "Head and shoulders not in view"}</div>}
+            </>}
+            {!active && <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-primary/15 p-6 text-center text-background">
+              {busy ? <><Loader2 className="h-10 w-10 animate-spin" aria-hidden /><p role="status">{cam === "requesting" ? "Waiting for camera permission…" : "Loading hand and body tracking…"}</p></> : <>
+                <div className="relative grid h-24 w-24 place-items-center rounded-2xl border border-background/30"><Camera className="h-10 w-10" aria-hidden /><span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent" /></div>
+                <div><h2 className="text-2xl font-bold">{cam === "off" ? "Ready when you are." : "Camera unavailable"}</h2><p className="mx-auto mt-2 max-w-xs text-sm text-background/80">{cam === "off" ? "Your video stays on this device." : errMsg}</p></div>
+                <Button onClick={() => start()} size="lg" className="bg-accent text-accent-foreground hover:bg-accent/90"><Camera aria-hidden />{cam === "off" ? "Start camera" : "Try again"}</Button>
+              </>}
+            </div>}
+            <div className="absolute inset-x-0 bottom-4 flex justify-center gap-3">
+              <Button size="icon" variant="outline" onClick={() => active ? stop() : start()} disabled={busy} aria-label={active ? "Turn camera off" : "Turn camera on"} title={active ? "Turn camera off" : "Turn camera on"} className="h-11 w-11 rounded-full">{active ? <CameraOff aria-hidden /> : <Camera aria-hidden />}</Button>
+              <Button size="icon" variant="outline" onClick={switchCamera} aria-label="Switch between front and back camera" title="Switch camera" className="h-11 w-11 rounded-full"><RefreshCcw aria-hidden /></Button>
+            </div>
+          </section>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>Hand + body tracking</span><span>{handsView.length} / 2 hands · {bodyVisible && active ? "Body visible" : "Body not detected"}</span></div>
+        </div>
+        <div className="min-w-0 space-y-6">
+          <section aria-label="Live translation" className="border-b border-border pb-6">
+            <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-bold"><span className={`h-2 w-2 rounded-full ${active ? "bg-success" : "bg-muted-foreground"}`} />Live Translation</h2><span className="text-xs font-semibold text-muted-foreground">{active ? "Live" : "Camera off"}</span></div>
+            <p className="my-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">{text.trim() ? text : <span className="text-muted-foreground/60">Waiting for a confirmed sign…</span>}</p>
+            <div className="space-y-2 rounded-lg bg-muted/60 p-3">
+              <div className="flex flex-wrap justify-between gap-2 text-xs font-semibold"><span>{status === "recognized" ? "Sign confirmed" : status === "tracking" && current?.label ? "Confirming…" : "Awaiting a clear match"}</span><span className="text-muted-foreground">Rule match {current?.label ? `${conf}%` : "—"}</span></div>
+              <progress aria-label="Sign confirmation progress" value={status === "tracking" || status === "recognized" ? progress : 0} max={1} className="confirmation-meter h-1.5 w-full" />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={speech.toggle} aria-pressed={speech.enabled} aria-label={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"} title={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"}>{speech.enabled ? <Volume2 aria-hidden /> : <VolumeX aria-hidden />}</Button>
+              <span className="mr-auto text-xs text-muted-foreground" role="status">{speech.state === "loading" ? "Preparing voice…" : speech.state === "speaking" ? "Speaking…" : speech.enabled ? "ElevenLabs · Voice on" : "Voice muted"}</span>
+              <Button variant="ghost" size="icon" disabled={!text.trim()} onClick={speech.replay} aria-label="Play translation" title="Play translation"><Play aria-hidden /></Button>
+              <Button variant="ghost" size="icon" disabled={speech.state === "idle"} onClick={speech.cancel} aria-label="Stop speaking" title="Stop speaking"><Square aria-hidden /></Button>
+              <Button variant="ghost" size="icon" disabled={!text.trim()} onClick={copy} aria-label="Copy translation" title="Copy translation"><Copy aria-hidden /></Button>
+              <Button variant="ghost" size="icon" disabled={!text.trim()} onClick={save} aria-label="Save translation" title="Save translation"><Save aria-hidden /></Button>
+              <Button variant="ghost" size="icon" disabled={!text} onClick={clear} aria-label="Clear translation" title="Clear translation"><Trash2 aria-hidden /></Button>
+            </div>
+            {speech.error && <p className="mt-2 text-sm text-destructive" role="alert">{speech.error}</p>}
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Voice sends confirmed text to ElevenLabs. Video is never uploaded.</p>
+          </section>
+          <section aria-label="Response">
+            <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-bold"><label htmlFor="conversation-response">Response</label></h2><Button variant="ghost" size="icon" disabled={!response} onClick={() => setResponse("")} aria-label="Clear response" title="Clear response"><Trash2 aria-hidden /></Button></div>
+            <Textarea id="conversation-response" value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Type your reply…" className="min-h-36 rounded-lg bg-card text-2xl font-semibold leading-relaxed md:text-2xl" />
+            <div className="mt-3 flex flex-wrap gap-2" aria-label="Quick replies">{["Thank you!", "Could you repeat that?", "How can I help?"].map((reply) => <Button key={reply} variant="outline" size="sm" onClick={() => setResponse(reply)} className="h-auto min-h-8 whitespace-normal text-left">{reply}</Button>)}</div>
+          </section>
+        </div>
       </div>
+      <section className="border-t border-border pt-6" aria-label="Guided practice">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">Phrase practice</h2><span className="text-xs font-semibold text-muted-foreground">Selected sign sequences · experimental two-hand matches</span></div>
+        <div className="flex flex-wrap gap-2">{[...PHRASE_PRACTICES.map((p) => p.title), ...TWO_HAND_SIGNS].map((name) => <Button key={name} variant={practice === name ? "default" : "outline"} onClick={() => navigate({ search: { practice: name } })}>{name}</Button>)}</div>
+        {practice && <div className="mt-4 border-l-2 border-primary pl-4" role="status">
+          <div className="flex items-center justify-between gap-3"><h3 className="font-bold">{practice}</h3><Button variant="ghost" size="sm" onClick={() => { setPracticeStep(0); builder.current.resetTracking(); tracksRef.current.clear(); pairRef.current = []; setProgress(0); }}>Restart</Button></div>
+          <div className="mt-2 flex flex-wrap gap-3">{signs.map((sign, i) => <span key={`${sign}-${i}`} className={`flex items-center gap-1.5 text-sm ${i < practiceStep ? "font-semibold text-success" : i === practiceStep ? "font-bold text-primary" : "text-muted-foreground"}`}>{i < practiceStep ? <Check className="h-4 w-4" aria-hidden /> : <span>{i + 1}.</span>}{sign}</span>)}</div>
+          <p className="mt-2 text-sm text-muted-foreground">{practiceStep === signs.length ? "Sequence complete." : experimental ? "Experimental two-hand practice. Repeat the movement; only continuous evidence above the threshold is confirmed." : `Current sign: ${target}. A match must remain at least 70% for over two seconds.`}</p>
+          {experimental && <a className="mt-2 inline-block text-sm font-semibold text-primary underline" target="_blank" rel="noreferrer" href={target === "Help" ? "https://www.lifeprint.com/asl101/pages-signs/h/help.htm" : target === "Meet" ? "https://www.lifeprint.com/asl101/pages-signs/m/meet.htm" : "https://www.lifeprint.com/asl101/pages-signs/n/nice.htm"}>ASL University reference ↗</a>}
+        </div>}
+      </section>
+      <section className="border-t border-border pt-5 text-sm">
+        <h2 className="font-bold">Supported vocabulary</h2>
+        <p className="mt-2 max-w-3xl text-muted-foreground">Selected signs, not full ASL sentence translation. Two-hand practice is experimental; rule-match percentages are not measured accuracy. Not a replacement for an interpreter.</p>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs font-semibold">{[...MOTION_SIGNS, ...SUPPORTED_SIGNS].map((sign) => <span key={sign} className="text-muted-foreground">{sign}</span>)}</div>
+      </section>
     </div>
   );
 }

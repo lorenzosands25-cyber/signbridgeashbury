@@ -25,7 +25,7 @@ function About() {
       </section>
       <section className="rounded-3xl bg-card p-6 shadow-card">
         <h2 className="text-lg font-bold">Honest limits</h2>
-        <p className="mt-2 text-muted-foreground">Today SignBridge recognizes a small set of static fingerspelling handshapes and "I love you". It does not yet understand movement-based signs, ASL grammar or facial expressions, and it is not a replacement for a qualified interpreter. Larger vocabularies and sentence recognition need a model trained on ASL video — the app is built so that model can be plugged in.</p>
+        <p className="mt-2 text-muted-foreground">Today SignBridge supports selected fingerspelling handshapes and six body-aware word signs. Guided practice also offers experimental two-hand candidates for Help, Nice / Clean, and Meet, plus short sign sequences. Confidence scores measure rule matches, not validated translation accuracy. Full ASL grammar, facial expressions, and natural sentence translation are not supported. It is not a replacement for a qualified interpreter; real-world accuracy still needs evaluation with fluent signers.</p>
       </section>
     </div>
   );
