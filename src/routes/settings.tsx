@@ -8,10 +8,10 @@ import { defaultSettings, useHistory, useSettings } from "@/lib/store";
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
-      { title: "Settings — SLai" },
-      { name: "description", content: "Camera, translation, text size, theme and privacy settings for SLai." },
-      { property: "og:title", content: "Settings — SLai" },
-      { property: "og:description", content: "Customize SLai." },
+      { title: "Settings — SignBridge" },
+      { name: "description", content: "Camera, translation, text size, theme and privacy settings for SignBridge." },
+      { property: "og:title", content: "Settings — SignBridge" },
+      { property: "og:description", content: "Customize SignBridge." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],

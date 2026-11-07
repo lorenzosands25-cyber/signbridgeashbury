@@ -3,13 +3,13 @@ import { BookOpen, History, Home, Info, Settings, Video } from "lucide-react";
 
 export function Logo() {
   return (
-    <Link to="/" className="flex items-center gap-2 font-extrabold text-lg tracking-tight" aria-label="SLai home">
+    <Link to="/" className="flex items-center gap-2 font-extrabold text-lg tracking-tight" aria-label="SignBridge home">
       <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand text-primary-foreground shadow-soft">
         <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
           <path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V5.5a1.5 1.5 0 0 1 3 0V14a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-2.7L3.5 15a1.6 1.6 0 0 1 2.6-1.8L8 15" />
         </svg>
       </span>
-      SLai
+      SignBridge
     </Link>
   );
 }

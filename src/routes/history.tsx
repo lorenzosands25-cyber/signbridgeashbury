@@ -7,9 +7,9 @@ import { useHistory } from "@/lib/store";
 export const Route = createFileRoute("/history")({
   head: () => ({
     meta: [
-      { title: "Translation History — SLai" },
+      { title: "Translation History — SignBridge" },
       { name: "description", content: "Review, search and favourite your previous ASL translations." },
-      { property: "og:title", content: "Translation History — SLai" },
+      { property: "og:title", content: "Translation History — SignBridge" },
       { property: "og:description", content: "Your saved ASL translations." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
