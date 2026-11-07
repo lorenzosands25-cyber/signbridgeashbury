@@ -8,7 +8,7 @@ import { useHistory, useSettings } from "@/lib/store";
 
 export const Route = createFileRoute("/translator")({
   validateSearch: (s: Record<string, unknown>): { practice?: string } =>
-    typeof s.practice === "string" ? { practice: s.practice } : {},
+    typeof s['practice'] === "string" ? { practice: s['practice'] } : {},
   head: () => ({
     meta: [
       { title: "Live ASL Translator — Signa" },

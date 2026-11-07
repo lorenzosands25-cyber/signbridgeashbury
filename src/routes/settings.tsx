@@ -54,13 +54,13 @@ function SettingsPage() {
         <div>
           <p className="font-semibold">Minimum confidence: {Math.round(s.threshold * 100)}%</p>
           <p className="mb-3 text-sm text-muted-foreground">Signs below this are shown as low confidence and never added.</p>
-          <Slider aria-label="Minimum confidence" min={50} max={95} step={5} value={[s.threshold * 100]} onValueChange={([v]) => up({ threshold: v / 100 })} />
+          <Slider aria-label="Minimum confidence" min={50} max={95} step={5} value={[s.threshold * 100]} onValueChange={([v]) => up({ threshold: (v ?? 75) / 100 })} />
         </div>
       </Card>
       <Card title="Display">
         <div>
           <p className="mb-3 font-semibold">Text size: {Math.round(s.textScale * 100)}%</p>
-          <Slider aria-label="Text size" min={90} max={140} step={10} value={[s.textScale * 100]} onValueChange={([v]) => up({ textScale: v / 100 })} />
+          <Slider aria-label="Text size" min={90} max={140} step={10} value={[s.textScale * 100]} onValueChange={([v]) => up({ textScale: (v ?? 100) / 100 })} />
         </div>
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Theme">
           {(["light", "dark"] as const).map((t) => (

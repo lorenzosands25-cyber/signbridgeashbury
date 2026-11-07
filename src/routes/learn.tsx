@@ -61,7 +61,7 @@ const categories: Record<string, Lesson[]> = {
 
 function Learn() {
   const cats = Object.keys(categories);
-  const [cat, setCat] = useState(cats[0]);
+  const [cat, setCat] = useState(cats[0]!);
   return (
     <div>
       <h1 className="text-3xl font-extrabold">Learn ASL</h1>
@@ -74,7 +74,7 @@ function Learn() {
         ))}
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {categories[cat].map((l, i) => {
+        {(categories[cat] ?? []).map((l, i) => {
           const practicable = (SUPPORTED_SIGNS as readonly string[]).includes(l.word);
           return (
             <article key={l.word} className="animate-rise flex flex-col rounded-3xl bg-card p-5 shadow-card" style={{ animationDelay: `${i * 50}ms` }}>
