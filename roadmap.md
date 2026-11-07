@@ -1,6 +1,10 @@
 # Full ASL phrases and movements
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
+# Inline gesture transitions
+- [x] Show tentative text inline with final translation using muted text and a dotted underline; only accepted text enters speech, copy, and saved history.
+- [x] Accept the prior guess above 65% on a different detected sign from the same hand in free conversation; guided practice retains its gate. Reset on lost/low-confidence evidence, camera changes, and sample gaps. All 58 ASL tests pass; browser verified early L acceptance on D transition, inline next guess, no unaccepted text after camera stop, and 771px layout. Gesture changes are acceptance heuristics, not proof of accuracy.
+
 # Moving gesture matching
 - [x] Improve continuous moving-gesture matching: chest-height Yes uses body-relative cumulative reversals, supports 10–120 fps samples, rejects jitter/body shifts, and retains Sorry precedence. Motion requires 600ms and six samples rather than twelve; no confirmation thresholds lowered. 54 ASL tests pass; simulated moving-camera flow shows tentative Yes before gated text, then clears stale suggestions when motion stops. Physical-signing accuracy remains unverified.
 - [x] User chose tentative suggestions strictly above 65%, separate from Live Translation and speech. Handshape confidence caps movement confidence; 70% for over two seconds still gates every translation, and experimental two-hand practice keeps its original confidence floor.
@@ -18,7 +22,7 @@
 # Recognition accuracy
 - [x] Parallelize model loading, deduplicate/rate-limit display-only updates, eliminate repeated canvas resizing, and reset evidence between phrase steps. Fake-camera benchmark reduced canvas resets from 8 to 0 over three seconds but processed frames remained 4; no 10x speedup established. Recognition thresholds and per-frame inference retained.
 - [x] Reset old single/two-hand motion evidence on the first changed-handshape frame, retaining the 600ms motion evidence and 70%/over-two-second confirmation thresholds; 33 recognition tests and camera/layout checks pass. Physical signing accuracy remains unverified.
-- [x] Require continuous 70% confidence for more than two seconds for every committed sign.
+- [x] Retain continuous 70% confidence for over two seconds in guided practice and for unchanged signs; free conversation now also permits user-requested gesture-transition acceptance.
 - [x] Reduce false matches and prevent mixing hand tracks or stale frames.
 - [x] Test confirmation rules and verify the camera flow (simulated landmarks confirmed delayed text and no duplicates; physical signing accuracy remains unverified).
 
