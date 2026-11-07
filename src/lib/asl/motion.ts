@@ -10,7 +10,7 @@ export type Pt = { x: number; y: number };
 /** Body reference frame for one video frame, in pixel-like units. */
 export type Body = { sw: number; mouth: Pt; forehead: Pt; shoulderMid: Pt };
 
-export type Frame = { t: number; shape: Shape; palm: Pt; tip: Pt; indexTip: Pt; body: Body };
+export type Frame = { t: number; shape: Shape; palm: Pt; tip: Pt; indexTip: Pt; body: Body; palmNormal?: { x: number; y: number; z: number }; thumbUp?: boolean };
 
 export type MotionResult = { label: string; confidence: number } | null;
 
