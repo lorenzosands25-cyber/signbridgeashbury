@@ -201,7 +201,7 @@ function Translator() {
               const length = Math.hypot(nx, ny, nz);
               if (length > 0) palmNormal = { x: nx / length, y: ny / length, z: nz / length };
             }
-            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body, palmNormal, thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
+            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body, ...(palmNormal ? { palmNormal } : {}), thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
             frameBySide.set(result.side, f);
             const tr = (tracksRef.current.get(key) ?? []).filter((x) => now - x.t < 1200);
             tr.push(f);
@@ -393,7 +393,7 @@ function Translator() {
                 <Button onClick={() => start()} size="lg" className="bg-accent text-accent-foreground hover:bg-accent/90"><Camera aria-hidden />{cam === "off" ? "Start camera" : "Try again"}</Button>
               </>}
             </div>}
-            <div className="absolute inset-x-0 bottom-4 flex justify-center gap-3">
+            <div className={`${active || busy ? "absolute inset-x-0 bottom-4" : "hidden"} flex justify-center gap-3`}>
               <Button size="icon" variant="outline" onClick={() => active ? stop() : start()} disabled={busy} aria-label={active ? "Turn camera off" : "Turn camera on"} title={active ? "Turn camera off" : "Turn camera on"} className="h-11 w-11 rounded-full">{active ? <CameraOff aria-hidden /> : <Camera aria-hidden />}</Button>
               <Button size="icon" variant="outline" onClick={switchCamera} aria-label="Switch between front and back camera" title="Switch camera" className="h-11 w-11 rounded-full"><RefreshCcw aria-hidden /></Button>
             </div>
