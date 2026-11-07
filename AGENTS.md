@@ -28,4 +28,4 @@ use the editor.
   own key and store it in Secrets.
 - **Secrets.** Lovable manages them. Do not put secret values in the repo.
 <!-- LOVABLE:END -->
-- ASL recognition: MediaPipe HandLandmarker (on-device) feeds src/lib/asl/classifier.ts; swap that classifier for a trained model keeping the Classification shape — keeps the UI/commit logic unchanged. Only SentenceBuilder commits text, gated by confidence, so nothing uncertain is shown as recognized.
+- ASL recognition: MediaPipe Hand + Pose landmarkers (on-device). Static handshapes in src/lib/asl/classifier.ts, body-location/movement word signs in src/lib/asl/motion.ts; replace either with trained models keeping their output shapes so UI/commit logic stays unchanged. Only SentenceBuilder commits text, gated by confidence, so nothing uncertain is shown as recognized.
