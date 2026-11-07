@@ -3,6 +3,7 @@ import { Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
+import { Button } from "@/components/ui/button";
 import { defaultSettings, useHistory, useSettings } from "@/lib/store";
 
 export const Route = createFileRoute("/settings")({
@@ -21,7 +22,7 @@ export const Route = createFileRoute("/settings")({
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-3xl bg-card p-6 shadow-card">
+    <section className="border-b border-border py-6">
       <h2 className="text-lg font-bold">{title}</h2>
       <div className="mt-4 space-y-5">{children}</div>
     </section>
@@ -45,10 +46,13 @@ function SettingsPage() {
       <h1 className="text-3xl font-extrabold">Settings</h1>
       <Card title="Camera">
         <Row id="facing" label="Default camera" hint={s.facingMode === "user" ? "Front-facing" : "Rear-facing"}>
-          <button id="facing" onClick={() => up({ facingMode: s.facingMode === "user" ? "environment" : "user" })} className="h-11 rounded-2xl bg-muted px-4 font-semibold">Switch</button>
+          <Button id="facing" variant="outline" onClick={() => up({ facingMode: s.facingMode === "user" ? "environment" : "user" })}>Switch</Button>
         </Row>
         <Row id="mirror" label="Mirror front camera"><Switch id="mirror" checked={s.mirror} onCheckedChange={(v) => up({ mirror: v })} /></Row>
         <Row id="lm" label="Show hand tracking overlay"><Switch id="lm" checked={s.showLandmarks} onCheckedChange={(v) => up({ showLandmarks: v })} /></Row>
+        <div className="grid grid-cols-2 gap-2" aria-label="Camera quality">
+          {(["balanced", "detail"] as const).map((quality) => <Button key={quality} variant={s.cameraQuality === quality ? "default" : "outline"} aria-pressed={s.cameraQuality === quality} onClick={() => up({ cameraQuality: quality })}>{quality === "balanced" ? "Balanced" : "High detail"}</Button>)}
+        </div>
       </Card>
       <Card title="Translation">
         <div>
@@ -63,15 +67,15 @@ function SettingsPage() {
         </div>
         <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Theme">
           {(["light", "dark"] as const).map((t) => (
-            <button key={t} role="radio" aria-checked={s.theme === t} onClick={() => up({ theme: t })} className={`flex h-12 items-center justify-center gap-2 rounded-2xl font-semibold capitalize ${s.theme === t ? "bg-brand text-primary-foreground" : "bg-muted"}`}>
+            <Button key={t} variant={s.theme === t ? "default" : "outline"} role="radio" aria-checked={s.theme === t} onClick={() => up({ theme: t })} className="h-12 capitalize">
               {t === "light" ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />} {t}
-            </button>
+            </Button>
           ))}
         </div>
       </Card>
       <Card title="Data & privacy">
         <p className="text-muted-foreground">Camera video is processed entirely on your device by the hand-tracking AI. Nothing is recorded or uploaded. Saved translations are stored only in this browser.</p>
-        <button onClick={() => { if (confirm("Delete all translation history?")) { setHistory([]); toast.success("History cleared"); } }} className="h-12 w-full rounded-2xl bg-destructive/10 font-semibold text-destructive">Clear translation history</button>
+        <Button variant="destructive" onClick={() => { if (confirm("Delete all translation history?")) { setHistory([]); toast.success("History cleared"); } }} className="h-12 w-full">Clear translation history</Button>
       </Card>
     </div>
   );
