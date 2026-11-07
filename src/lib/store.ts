@@ -13,7 +13,7 @@ export type Settings = {
 export const defaultSettings: Settings = {
   facingMode: "user",
   mirror: true,
-  threshold: 0.75,
+  threshold: 0.7,
   showLandmarks: true,
   textScale: 1,
   theme: "light",
@@ -25,7 +25,14 @@ const SK = "signa.settings";
 function read<T>(k: string, fallback: T): T {
   try {
     const v = localStorage.getItem(k);
-    return v ? { ...(fallback as object), ...JSON.parse(v) } : fallback;
+    const stored = v ? { ...(fallback as object), ...JSON.parse(v) } : fallback;
+    // Migrate the previous frame-based confirmation setting once.
+    if (k === SK && v && localStorage.getItem("signa.confirmation-v2") !== "true") {
+      Object.assign(stored as object, { threshold: 0.7 });
+      localStorage.setItem(SK, JSON.stringify(stored));
+      localStorage.setItem("signa.confirmation-v2", "true");
+    }
+    return stored;
   } catch {
     return fallback;
   }

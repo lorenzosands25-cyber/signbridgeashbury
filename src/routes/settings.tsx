@@ -52,9 +52,8 @@ function SettingsPage() {
       </Card>
       <Card title="Translation">
         <div>
-          <p className="font-semibold">Minimum confidence: {Math.round(s.threshold * 100)}%</p>
-          <p className="mb-3 text-sm text-muted-foreground">Signs below this are shown as low confidence and never added.</p>
-          <Slider aria-label="Minimum confidence" min={50} max={95} step={5} value={[s.threshold * 100]} onValueChange={([v]) => up({ threshold: (v ?? 75) / 100 })} />
+          <p className="font-semibold">Minimum confidence: {Math.round(Math.max(0.7, s.threshold) * 100)}%</p>
+          <Slider aria-label="Minimum confidence" min={70} max={95} step={5} value={[Math.max(70, s.threshold * 100)]} onValueChange={([v]) => up({ threshold: (v ?? 70) / 100 })} />
         </div>
       </Card>
       <Card title="Display">
