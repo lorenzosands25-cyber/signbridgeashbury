@@ -19,8 +19,9 @@ export const SUPPORTED_SIGNS = [
 const d = (a: Landmark, b: Landmark) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
-export function classifyHandshape(lm: Landmark[]): Classification {
-  if (lm.length < 21) return { label: null, kind: "letter", confidence: 0 };
+export function classifyHandshape(input: Landmark[]): Classification {
+  const lm = input as Landmark[] & Record<number, Landmark>;
+  if (input.length < 21) return { label: null, kind: "letter", confidence: 0 };
   const palm = d(lm[0], lm[9]) || 1e-6;
 
   const fingerScore = (pip: number, tip: number) =>

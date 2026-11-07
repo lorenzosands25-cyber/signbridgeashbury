@@ -23,7 +23,7 @@ export const Route = createFileRoute("/translator")({
 });
 
 type CamState = "off" | "requesting" | "loading-model" | "on" | "denied" | "unavailable" | "error";
-const CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+const CONNECTIONS: [number, number][] = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
 
 const statusInfo: Record<BuilderStatus, { label: string; cls: string }> = {
   idle: { label: "No hand detected", cls: "bg-muted text-muted-foreground" },
@@ -73,12 +73,13 @@ function Translator() {
       c.width = v.videoWidth; c.height = v.videoHeight;
       const ctx = c.getContext("2d")!;
       ctx.clearRect(0, 0, c.width, c.height);
-      const hand = res.landmarks?.[0];
+      const hand = res.landmarks?.[0] as { x: number; y: number }[] | undefined;
       if (hand) {
         if (settings.showLandmarks) {
           ctx.strokeStyle = "rgba(99,230,213,0.9)"; ctx.lineWidth = 4;
           for (const [a, b] of CONNECTIONS) {
-            ctx.beginPath(); ctx.moveTo(hand[a].x * c.width, hand[a].y * c.height); ctx.lineTo(hand[b].x * c.width, hand[b].y * c.height); ctx.stroke();
+            const pa = hand[a]!, pb = hand[b]!;
+            ctx.beginPath(); ctx.moveTo(pa.x * c.width, pa.y * c.height); ctx.lineTo(pb.x * c.width, pb.y * c.height); ctx.stroke();
           }
           ctx.fillStyle = "rgba(121,87,255,1)";
           for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
@@ -99,7 +100,7 @@ function Translator() {
         const s = document.createElement("canvas"); s.width = 32; s.height = 24;
         const sc = s.getContext("2d")!; sc.drawImage(v, 0, 0, 32, 24);
         const d = sc.getImageData(0, 0, 32, 24).data; let sum = 0;
-        for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+        for (let i = 0; i < d.length; i += 4) sum += d[i]! + d[i + 1]! + d[i + 2]!;
         setLowLight(sum / (d.length / 4) / 3 < 50);
       }
     }
