@@ -312,12 +312,12 @@ function Translator() {
         if (motionHit) {
           const mh = motionHit as { label: string; confidence: number; source: string };
           const candidate: Classification = { label: mh.label, kind: "word", confidence: mh.confidence };
-          const r = builder.current.push(candidate, now, mh.source);
+          const r = builder.current.push(candidate, now, mh.source, signs.length === 0);
           publishTracking(candidate, r.status, now);
           if (r.committed) {
             setText(builder.current.text);
             setCommittedCount((n) => n + 1);
-            setPracticeStep((step) => advancePractice(signs, step, mh.label));
+            setPracticeStep((step) => advancePractice(signs, step, r.committed ?? ""));
           }
           rafRef.current = requestAnimationFrame(loop);
           return;
@@ -333,7 +333,7 @@ function Translator() {
         // The sentence uses whichever hand shows the most confident recognized sign.
         const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0];
         if (!best) return;
-        const r = builder.current.push(best.cls, now, best.side);
+        const r = builder.current.push(best.cls, now, best.side, signs.length === 0);
         publishTracking(best.cls, r.status, now);
         if (r.committed) {
           setText(builder.current.text);
@@ -510,11 +510,9 @@ function Translator() {
         <div className="min-w-0 space-y-6">
           <section aria-label="Live translation" className="border-b border-border pb-6">
             <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-bold"><span className={`h-2 w-2 rounded-full ${active ? "bg-success" : "bg-muted-foreground"}`} />Live Translation</h2><span className="text-xs font-semibold text-muted-foreground">{active ? "Live" : "Camera off"}</span></div>
-            <p className="my-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">{text.trim() ? text : <span className="text-muted-foreground/60">Waiting for a confirmed sign…</span>}</p>
-            <div aria-label="Tentative match" className="mb-3 flex min-h-10 flex-wrap items-center justify-between gap-2 border-l-2 border-secondary pl-3 text-sm">
-              <span className="text-muted-foreground">Possible sign · not confirmed</span>
-              <span className="font-semibold text-foreground">{suggestion ? `${suggestion.label} · ${Math.round(suggestion.confidence * 100)}%` : "—"}</span>
-            </div>
+            <p className="my-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">
+              {text}{suggestion ? <>{text && !text.endsWith(" ") && suggestion.kind === "word" ? " " : ""}<span aria-label="Tentative match" title="Tentative — not yet accepted" className="text-muted-foreground underline decoration-secondary decoration-dotted underline-offset-4">{suggestion.label}</span></> : !text.trim() ? <span className="text-muted-foreground/60">Waiting for a confirmed sign…</span> : null}
+            </p>
             <div className="space-y-2 rounded-lg bg-muted/60 p-3">
               <div className="flex flex-wrap justify-between gap-2 text-xs font-semibold"><span>{status === "recognized" ? "Sign confirmed" : status === "tracking" && current?.label ? "Confirming…" : "Awaiting a clear match"}</span><span className="text-muted-foreground">Rule match {current?.label ? `${conf}%` : "—"}</span></div>
               <progress aria-label="Sign confirmation progress" value={status === "tracking" || status === "recognized" ? progress : 0} max={1} className="confirmation-meter h-1.5 w-full" />
