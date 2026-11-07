@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Save, Trash2, Volume2, VolumeX, Play, Square } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Save, Trash2, Volume2, VolumeX, Play, Square, SlidersHorizontal, Gauge, ShieldCheck, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
@@ -8,6 +8,9 @@ import { detectTwoHandSign, type PairedFrame } from "@/lib/asl/two-hand";
 import { updateMotionWindow } from "@/lib/asl/motion-window";
 import { needsDisplayUpdate, sameDisplayedClassification } from "@/lib/asl/live-display";
 import { advancePractice, practiceSigns, PHRASE_PRACTICES, TWO_HAND_SIGNS } from "@/lib/asl/practice";
+import { cameraConstraints, cameraError, inferenceSize, type CameraQuality } from "@/lib/asl/camera";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -55,6 +58,18 @@ function Translator() {
   const [, setHistory] = useHistory();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const requestRef = useRef(0);
+  const modelPromiseRef = useRef<Promise<void> | null>(null);
+  const inputRef = useRef<HTMLCanvasElement | null>(null);
+  const lightRef = useRef<HTMLCanvasElement | null>(null);
+  const lastLightRef = useRef(-Infinity);
+  const metricsRef = useRef({ start: 0, frames: 0, total: 0 });
+  const [metrics, setMetrics] = useState({ fps: 0, ms: 0 });
+  const [cameraPanel, setCameraPanel] = useState(false);
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = useState("");
+  const [resolution, setResolution] = useState("");
+  const [bodyModelReady, setBodyModelReady] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const landmarkerRef = useRef<any>(null);
   const poseRef = useRef<any>(null);
@@ -108,6 +123,7 @@ function Translator() {
   }, [practiceStep]);
 
   const stop = useCallback(() => {
+    requestRef.current += 1;
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -122,25 +138,52 @@ function Translator() {
     smoothRef.current = [];
     identitiesRef.current = "";
     videoTimeRef.current = -1;
+    setBodyVisible(false);
+    setLowLight(false);
+    setMetrics({ fps: 0, ms: 0 });
+    canvasRef.current?.getContext("2d")?.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  useEffect(() => () => stop(), [stop]);
+  useEffect(() => () => { stop(); landmarkerRef.current?.close(); poseRef.current?.close(); }, [stop]);
+
+  useEffect(() => {
+    const refresh = async () => {
+      try { setDevices((await navigator.mediaDevices?.enumerateDevices() ?? []).filter((d) => d.kind === "videoinput")); } catch { /* Camera permission may be required. */ }
+    };
+    void refresh();
+    navigator.mediaDevices?.addEventListener("devicechange", refresh);
+    return () => navigator.mediaDevices?.removeEventListener("devicechange", refresh);
+  }, []);
 
   const loop = useCallback(() => {
     const v = videoRef.current, c = canvasRef.current, lmk = landmarkerRef.current;
     if (!v || !c || !lmk || !streamRef.current) return;
+    try {
     if (v.readyState >= 2 && v.currentTime !== videoTimeRef.current) {
       videoTimeRef.current = v.currentTime;
       const now = performance.now();
-      const res = lmk.detectForVideo(v, now);
+      const input = inputRef.current ?? document.createElement("canvas");
+      inputRef.current = input;
+      const size = inferenceSize(v.videoWidth, v.videoHeight, settings.cameraQuality);
+      if (input.width !== size.width) input.width = size.width;
+      if (input.height !== size.height) input.height = size.height;
+      const inputContext = input.getContext("2d");
+      if (!inputContext) throw new Error("Camera frame unavailable");
+      inputContext.drawImage(v, 0, 0, input.width, input.height);
+      const res = lmk.detectForVideo(input, now);
+      // Keep identities stable when MediaPipe changes detection array order.
+      const order = (res.landmarks ?? []).map((_: unknown, i: number) => i).sort((a: number, b: number) => (res.handedness?.[a]?.[0]?.categoryName ?? "").localeCompare(res.handedness?.[b]?.[0]?.categoryName ?? ""));
+      const orderedHands = order.map((i: number) => res.landmarks[i]);
+      const orderedSides = order.map((i: number) => res.handedness?.[i]);
       if (c.width !== v.videoWidth) c.width = v.videoWidth;
       if (c.height !== v.videoHeight) c.height = v.videoHeight;
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, c.width, c.height);
       type P = { x: number; y: number; z?: number };
-      const raw = (res.landmarks ?? []) as P[][];
-      const identities = raw.map((_, i) => res.handedness?.[i]?.[0]?.categoryName ?? `Hand ${i + 1}`).join(",");
+      const raw = orderedHands as P[][];
+      const identities = raw.map((_, i) => orderedSides[i]?.[0]?.categoryName ?? `Hand ${i + 1}`).join(",");
       if (identitiesRef.current !== identities) {
         smoothRef.current = [];
         tracksRef.current.clear();
@@ -164,13 +207,21 @@ function Translator() {
       const W = c.width, H = c.height;
       const px = (p: { x: number; y: number }) => ({ x: p.x * W, y: p.y * H });
       let body: Body | null = null;
-      const pose = poseRef.current?.detectForVideo(v, now)?.landmarks?.[0] as { x: number; y: number; visibility?: number; presence?: number }[] | undefined;
+      const pose = poseRef.current?.detectForVideo(input, now)?.landmarks?.[0] as { x: number; y: number; visibility?: number; presence?: number }[] | undefined;
       if (pose && [11, 12, 9, 10, 2, 5].every((i) => (pose[i]?.visibility ?? 0) >= 0.7 && (pose[i]?.presence ?? 1) >= 0.7) && pose[11] && pose[12] && pose[9] && pose[10] && pose[2] && pose[5]) {
         const ls = px(pose[11]), rs = px(pose[12]);
         const mouth = { x: (pose[9].x + pose[10].x) / 2 * W, y: (pose[9].y + pose[10].y) / 2 * H };
         const eye = { x: (pose[2].x + pose[5].x) / 2 * W, y: (pose[2].y + pose[5].y) / 2 * H };
         const sw = Math.hypot(ls.x - rs.x, ls.y - rs.y);
         if (sw > 20) body = { sw, mouth, forehead: { x: eye.x, y: eye.y - (mouth.y - eye.y) }, shoulderMid: { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 } };
+      }
+      const elapsed = performance.now() - now;
+      const metric = metricsRef.current;
+      if (!metric.start) metric.start = now;
+      metric.frames += 1; metric.total += elapsed;
+      if (now - metric.start >= 1000) {
+        setMetrics({ fps: Math.round(metric.frames * 1000 / (now - metric.start)), ms: Math.round(metric.total / metric.frames) });
+        metricsRef.current = { start: now, frames: 0, total: 0 };
       }
       setBodyVisible(!!body);
       if (body && settings.showLandmarks) {
@@ -193,11 +244,11 @@ function Translator() {
             ctx.fillStyle = "rgba(121,87,255,1)";
             for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
           }
-          const side = (res.handedness?.[i]?.[0]?.categoryName as string | undefined) ?? `Hand ${i + 1}`;
+          const side = (orderedSides[i]?.[0]?.categoryName as string | undefined) ?? `Hand ${i + 1}`;
           // MediaPipe x/z use image width; y uses image height. Equalize axes.
           return { side, cls: classifyHandshape(hand.map((p) => ({ ...p, x: p.x * W / H, z: (p.z ?? 0) * W / H }))) };
         });
-        setHandsView((previous) => previous.length === results.length && previous.every((hand, i) => hand.side === results[i]?.side) ? previous : results);
+        setHandsView((previous) => previous.length === results.length && previous.every((hand, i) => hand.side === results[i]?.side && sameDisplayedClassification(hand.cls, results[i]?.cls ?? null)) ? previous : results);
         // Movement + body-location signs (Please, Thank you, …) per hand.
         let motionHit: { label: string; confidence: number; source: string } | null = null;
         let anyInZone = false;
@@ -208,7 +259,7 @@ function Translator() {
             const result = results[i];
             const tip = hand[12], indexTip = hand[8];
             if (!result || !tip || !indexTip || !body) return;
-            const key = result.side + i;
+            const key = result.side;
             seen.add(key);
             const l = result.cls.confidence >= Math.max(0.7, settings.threshold) ? result.cls.label : null;
             const shape: Shape = l === "B" || l === "5" ? "open" : l === "A" || l === "S" ? "fist" : l === "D" ? "index" : "other";
@@ -287,8 +338,10 @@ function Translator() {
         setText((previous) => previous === builder.current.text ? previous : builder.current.text);
       }
       // Cheap brightness check every ~60 frames
-      if (Math.floor(now / 1000) % 3 === 0 && Math.random() < 0.05) {
-        const s = document.createElement("canvas"); s.width = 32; s.height = 24;
+      if (now - lastLightRef.current >= 2000) {
+        lastLightRef.current = now;
+        const s = lightRef.current ?? document.createElement("canvas"); lightRef.current = s;
+        if (s.width !== 32) s.width = 32; if (s.height !== 24) s.height = 24;
         const sc = s.getContext("2d");
         if (!sc) return;
         sc.drawImage(v, 0, 0, 32, 24);
@@ -298,58 +351,69 @@ function Translator() {
       }
     }
     rafRef.current = requestAnimationFrame(loop);
-  }, [settings.showLandmarks, settings.threshold, practice, practiceStep, publishTracking]);
-
-  const start = useCallback(async (facing = settings.facingMode) => {
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCam("unavailable"); setErrMsg("Your browser doesn't support camera access. Try the latest Chrome, Safari or Edge."); return;
+    } catch (error) {
+      stop();
+      const failure = cameraError(error);
+      setCam(failure.state); setErrMsg(failure.message);
     }
-    cancelAnimationFrame(rafRef.current);
-    builder.current.resetTracking();
-    tracksRef.current.clear();
-    pairRef.current = [];
-    setProgress(0);
-    smoothRef.current = [];
-    identitiesRef.current = "";
-    videoTimeRef.current = -1;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    setCam("requesting");
+  }, [settings.cameraQuality, stop, settings.showLandmarks, settings.threshold, practice, practiceStep, publishTracking]);
+
+  const start = useCallback(async (facing = settings.facingMode, selectedDevice = deviceId, quality: CameraQuality = settings.cameraQuality) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCam("unavailable"); setErrMsg("Your browser doesn't support camera access. Try Chrome, Safari or Edge."); return;
+    }
+    stop();
+    const request = ++requestRef.current;
+    setErrMsg(""); setCam("requesting");
+    let acquired: MediaStream | null = null;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
-      streamRef.current = stream;
+      acquired = await navigator.mediaDevices.getUserMedia(cameraConstraints(facing, quality, selectedDevice));
+      if (request !== requestRef.current) { acquired.getTracks().forEach((t) => t.stop()); return; }
+      streamRef.current = acquired;
       const v = videoRef.current;
-      if (!v) { stream.getTracks().forEach((t) => t.stop()); return; }
-      v.srcObject = stream;
+      if (!v) { stop(); return; }
+      const track = acquired.getVideoTracks()[0];
+      if (track) track.onended = () => {
+        if (request !== requestRef.current) return;
+        stop(); setCam("error"); setErrMsg("Camera disconnected. Reconnect it or choose another camera.");
+      };
+      v.srcObject = acquired;
       await v.play();
+      if (request !== requestRef.current) return;
+      setResolution(`${v.videoWidth} × ${v.videoHeight}`);
+      setDevices((await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput"));
       if (!landmarkerRef.current) {
         setCam("loading-model");
-        const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
-        const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/wasm");
-        const [handModel, poseModel] = await Promise.all([HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
-          runningMode: "VIDEO",
-          numHands: 2,
-          minHandDetectionConfidence: 0.6,
-          minHandPresenceConfidence: 0.6,
-          minTrackingConfidence: 0.5,
-        }), PoseLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
-            runningMode: "VIDEO",
-            numPoses: 1,
-          }).catch(() => null)]);
-        landmarkerRef.current = handModel;
-        poseRef.current = poseModel; // Body signs unavailable if pose loading fails; letters still work.
+        if (!modelPromiseRef.current) {
+          modelPromiseRef.current = (async () => {
+            const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
+            const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/wasm");
+            const hands = (delegate: "GPU" | "CPU") => HandLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate },
+              runningMode: "VIDEO", numHands: 2, minHandDetectionConfidence: 0.6, minHandPresenceConfidence: 0.6, minTrackingConfidence: 0.5,
+            });
+            const pose = (delegate: "GPU" | "CPU") => PoseLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate }, runningMode: "VIDEO", numPoses: 1,
+            });
+            const [handModel, poseModel] = await Promise.all([hands("GPU").catch(() => hands("CPU")), pose("GPU").catch(() => pose("CPU")).catch(() => null)]);
+            landmarkerRef.current = handModel; poseRef.current = poseModel;
+          })().finally(() => { modelPromiseRef.current = null; });
+        }
+        await modelPromiseRef.current;
       }
+      if (request !== requestRef.current) return;
+      setBodyModelReady(!!poseRef.current);
+      metricsRef.current = { start: 0, frames: 0, total: 0 };
       setCam("on");
       rafRef.current = requestAnimationFrame(loop);
-    } catch (e: any) {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-      if (e?.name === "NotAllowedError") { setCam("denied"); setErrMsg("Camera access was blocked. Allow camera access in your browser's site settings, then try again."); }
-      else if (e?.name === "NotFoundError" || e?.name === "OverconstrainedError") { setCam("unavailable"); setErrMsg("No camera was found on this device."); }
-      else { setCam("error"); setErrMsg(e?.message ? `Something went wrong: ${e.message}` : "Couldn't start the camera or AI model. Check your connection and try again."); }
+    } catch (error) {
+      acquired?.getTracks().forEach((t) => t.stop());
+      if (request !== requestRef.current) return;
+      stop();
+      const failure = cameraError(error);
+      setCam(failure.state); setErrMsg(failure.message);
     }
-  }, [settings.facingMode, loop]);
+  }, [settings.facingMode, settings.cameraQuality, deviceId, loop, stop]);
 
   useEffect(() => {
     if (cam === "on") { cancelAnimationFrame(rafRef.current); rafRef.current = requestAnimationFrame(loop); }
@@ -357,8 +421,9 @@ function Translator() {
 
   const switchCamera = () => {
     const next = settings.facingMode === "user" ? "environment" : "user";
+    setDeviceId("");
     setSettings((s) => ({ ...s, facingMode: next }));
-    if (cam === "on") start(next);
+    if (cam === "on") void start(next, "");
   };
 
   const clear = () => { builder.current.clear(); tracksRef.current.clear(); pairRef.current = []; setText(""); setProgress(0); setCommittedCount(0); };
@@ -377,16 +442,16 @@ function Translator() {
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
         <div>
           <p className="mb-2 flex items-center gap-2 text-xs font-bold uppercase text-primary"><span className="h-2 w-2 rounded-full bg-accent" /> SignBridge · Conversation</p>
-          <h1 className="text-3xl font-extrabold">A conversation, connected.</h1>
+          <h1 className="text-3xl font-extrabold">SignBridge Studio</h1>
         </div>
         <div className="flex gap-5 text-xs font-semibold text-muted-foreground">
           <span className="flex items-center gap-2"><Camera className="h-4 w-4" aria-hidden /> On-device video</span>
           <span className="flex items-center gap-2"><Check className="h-4 w-4 text-success" aria-hidden /> {committedCount} confirmed</span>
         </div>
       </header>
-      <div className="grid items-start gap-6 lg:grid-cols-[1.1fr_1fr]">
+      <div className="grid items-start gap-6 md:grid-cols-[1.1fr_1fr]">
         <div className="min-w-0 space-y-3">
-          <section aria-label="Camera" className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-foreground shadow-soft lg:aspect-[4/5]">
+          <section aria-label="Camera" className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-camera shadow-soft md:aspect-[4/5]">
             <video ref={videoRef} playsInline muted className={`absolute inset-0 h-full w-full object-contain ${mirrored ? "-scale-x-100" : ""} ${active ? "" : "opacity-0"}`} />
             <canvas ref={canvasRef} aria-hidden className={`absolute inset-0 h-full w-full object-contain ${mirrored ? "-scale-x-100" : ""}`} />
             {active && <>
@@ -398,19 +463,37 @@ function Translator() {
               </div>
               {(!bodyVisible || lowLight) && <div className="absolute inset-x-3 bottom-20 rounded-lg bg-card/95 px-3 py-2 text-center text-xs font-semibold">{lowLight ? "Low light" : "Head and shoulders not in view"}</div>}
             </>}
-            {!active && <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 bg-primary/15 p-6 text-center text-background">
-              {busy ? <><Loader2 className="h-10 w-10 animate-spin" aria-hidden /><p role="status">{cam === "requesting" ? "Waiting for camera permission…" : "Loading hand and body tracking…"}</p></> : <>
-                <div className="relative grid h-24 w-24 place-items-center rounded-2xl border border-background/30"><Camera className="h-10 w-10" aria-hidden /><span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent" /></div>
-                <div><h2 className="text-2xl font-bold">{cam === "off" ? "Ready when you are." : "Camera unavailable"}</h2><p className="mx-auto mt-2 max-w-xs text-sm text-background/80">{cam === "off" ? "Your video stays on this device." : errMsg}</p></div>
+            {!active && <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 p-6 text-center text-camera-foreground">
+              {busy ? <><Loader2 className="h-10 w-10 animate-spin" aria-hidden /><p role="status">{cam === "requesting" ? "Waiting for camera permission…" : "Loading hand and body tracking…"}</p><Button variant="outline" onClick={stop}>Cancel</Button></> : <>
+                <div className="relative grid h-24 w-24 place-items-center rounded-2xl border border-camera-foreground/30"><Camera className="h-10 w-10" aria-hidden /><span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-accent" /></div>
+                <div><h2 className="text-2xl font-bold">{cam === "off" ? "Ready when you are." : "Camera unavailable"}</h2><p className="mx-auto mt-2 max-w-xs text-sm text-camera-foreground/80">{cam === "off" ? "Your video stays on this device." : errMsg}</p></div>
                 <Button onClick={() => start()} size="lg" className="bg-accent text-accent-foreground hover:bg-accent/90"><Camera aria-hidden />{cam === "off" ? "Start camera" : "Try again"}</Button>
               </>}
             </div>}
             <div className={`${active || busy ? "absolute inset-x-0 bottom-4" : "hidden"} flex justify-center gap-3`}>
               <Button size="icon" variant="outline" onClick={() => active ? stop() : start()} disabled={busy} aria-label={active ? "Turn camera off" : "Turn camera on"} title={active ? "Turn camera off" : "Turn camera on"} className="h-11 w-11 rounded-full">{active ? <CameraOff aria-hidden /> : <Camera aria-hidden />}</Button>
-              <Button size="icon" variant="outline" onClick={switchCamera} aria-label="Switch between front and back camera" title="Switch camera" className="h-11 w-11 rounded-full"><RefreshCcw aria-hidden /></Button>
+              <Button size="icon" variant="outline" onClick={() => setCameraPanel((open) => !open)} aria-label="Camera settings" title="Camera settings" className="h-11 w-11 rounded-full"><SlidersHorizontal aria-hidden /></Button>
+              <Button size="icon" variant="outline" onClick={switchCamera} disabled={busy} aria-label="Switch between front and back camera" title="Switch camera" className="h-11 w-11 rounded-full"><RefreshCcw aria-hidden /></Button>
             </div>
           </section>
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>Hand + body tracking</span><span>{handsView.length} / 2 hands · {bodyVisible && active ? "Body visible" : "Body not detected"}</span></div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5"><Gauge className="h-3.5 w-3.5" aria-hidden />{active ? `${metrics.fps} fps · ${metrics.ms} ms tracking` : "Tracking offline"}</span>
+            <span>{handsView.length} / 2 hands · {bodyVisible && active ? "Body visible" : "Body not detected"}</span>
+            <Button variant="ghost" size="sm" onClick={() => setCameraPanel((open) => !open)} aria-expanded={cameraPanel}><SlidersHorizontal aria-hidden />Camera settings</Button>
+          </div>
+          {active && !bodyModelReady && <p role="alert" className="text-sm text-destructive">Body tracking unavailable; only handshapes can be read. Restart the camera to retry.</p>}
+          {cameraPanel && <section aria-label="Camera settings" className="space-y-4 border-y border-border py-4">
+            <div className="flex items-center justify-between"><h2 className="text-sm font-bold">Camera settings</h2><span className="text-xs text-muted-foreground">{active ? resolution : "Camera off"}</span></div>
+            <Select value={deviceId || "default"} disabled={busy} onValueChange={(value) => { const id = value === "default" ? "" : value; setDeviceId(id); if (active) void start(settings.facingMode, id); }}>
+              <SelectTrigger aria-label="Camera device"><SelectValue placeholder="Choose camera" /></SelectTrigger>
+              <SelectContent><SelectItem value="default">Default {settings.facingMode === "user" ? "front" : "rear"} camera</SelectItem>{devices.filter((d) => d.deviceId).map((d, i) => <SelectItem key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</SelectItem>)}</SelectContent>
+            </Select>
+            <div className="grid grid-cols-2 gap-2" aria-label="Camera quality">{(["balanced", "detail"] as const).map((quality) => <Button key={quality} disabled={busy} variant={settings.cameraQuality === quality ? "default" : "outline"} aria-pressed={settings.cameraQuality === quality} onClick={() => { setSettings((s) => ({ ...s, cameraQuality: quality })); if (active) void start(settings.facingMode, deviceId, quality); }}>{quality === "balanced" ? "Balanced" : "High detail"}</Button>)}</div>
+            <div className="flex items-center justify-between gap-3"><label htmlFor="studio-mirror" className="text-sm">Mirror front camera</label><Switch id="studio-mirror" checked={settings.mirror} onCheckedChange={(mirror) => setSettings((s) => ({ ...s, mirror }))} /></div>
+            <div className="flex items-center justify-between gap-3"><label htmlFor="studio-overlay" className="text-sm">Tracking overlay</label><Switch id="studio-overlay" checked={settings.showLandmarks} onCheckedChange={(showLandmarks) => setSettings((s) => ({ ...s, showLandmarks }))} /></div>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => start()}><RotateCcw aria-hidden />Restart camera</Button>
+          </section>}
+
         </div>
         <div className="min-w-0 space-y-6">
           <section aria-label="Live translation" className="border-b border-border pb-6">
@@ -441,8 +524,14 @@ function Translator() {
       </div>
       <section className="border-t border-border pt-6" aria-label="Guided practice">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">Phrase practice</h2><span className="text-xs font-semibold text-muted-foreground">Selected sign sequences · experimental two-hand matches</span></div>
-        <div className="flex flex-wrap gap-2">{[...PHRASE_PRACTICES.map((p) => p.title), ...TWO_HAND_SIGNS].map((name) => <Button key={name} variant={practice === name ? "default" : "outline"} onClick={() => navigate({ search: { practice: name } })}>{name}</Button>)}</div>
-        {practice && <div className="mt-4 border-l-2 border-primary pl-4" role="status">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+          <Select value={signs.length ? practice : "free"} onValueChange={(value) => navigate({ search: value === "free" ? {} : { practice: value } })}>
+            <SelectTrigger aria-label="Phrase practice sequence"><SelectValue placeholder="Choose practice" /></SelectTrigger>
+            <SelectContent><SelectItem value="free">Free conversation</SelectItem>{[...PHRASE_PRACTICES.map((p) => p.title), ...TWO_HAND_SIGNS].map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
+          </Select>
+          <span className="flex items-center gap-2 text-xs text-muted-foreground"><ShieldCheck className="h-4 w-4" aria-hidden />70% minimum · over 2 seconds</span>
+        </div>
+        {practice && signs.length > 0 && <div className="mt-4 border-l-2 border-primary pl-4" role="status">
           <div className="flex items-center justify-between gap-3"><h3 className="font-bold">{practice}</h3><Button variant="ghost" size="sm" onClick={() => { setPracticeStep(0); builder.current.resetTracking(); tracksRef.current.clear(); pairRef.current = []; setProgress(0); }}>Restart</Button></div>
           <div className="mt-2 flex flex-wrap gap-3">{signs.map((sign, i) => <span key={`${sign}-${i}`} className={`flex items-center gap-1.5 text-sm ${i < practiceStep ? "font-semibold text-success" : i === practiceStep ? "font-bold text-primary" : "text-muted-foreground"}`}>{i < practiceStep ? <Check className="h-4 w-4" aria-hidden /> : <span>{i + 1}.</span>}{sign}</span>)}</div>
           <p className="mt-2 text-sm text-muted-foreground">{practiceStep === signs.length ? "Sequence complete." : experimental ? "Experimental two-hand practice. Repeat the movement; only continuous evidence above the threshold is confirmed." : `Current sign: ${target}. A match must remain at least 70% for over two seconds.`}</p>
