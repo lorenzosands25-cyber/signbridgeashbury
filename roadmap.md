@@ -7,6 +7,7 @@
 - [x] Polish the conversation screen, add quick replies and confirmation progress; camera startup, phrase selection, replies, and desktop/mobile layout verified; 33 tests pass.
 
 # Recognition accuracy
+- [ ] Reset old motion evidence immediately on handshape changes while preserving all confirmation thresholds; verify switching and camera behavior.
 - [x] Require continuous 70% confidence for more than two seconds for every committed sign.
 - [x] Reduce false matches and prevent mixing hand tracks or stale frames.
 - [x] Test confirmation rules and verify the camera flow (simulated landmarks confirmed delayed text and no duplicates; physical signing accuracy remains unverified).

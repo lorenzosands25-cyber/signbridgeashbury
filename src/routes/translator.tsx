@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
 import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
 import { detectTwoHandSign, type PairedFrame } from "@/lib/asl/two-hand";
+import { updateMotionWindow } from "@/lib/asl/motion-window";
 import { advancePractice, practiceSigns, PHRASE_PRACTICES, TWO_HAND_SIGNS } from "@/lib/asl/practice";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
@@ -203,8 +204,7 @@ function Translator() {
             }
             const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body, ...(palmNormal ? { palmNormal } : {}), thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
             frameBySide.set(result.side, f);
-            const tr = (tracksRef.current.get(key) ?? []).filter((x) => now - x.t < 1200);
-            tr.push(f);
+            const tr = updateMotionWindow(tracksRef.current.get(key) ?? [], f, (frame) => frame.shape);
             tracksRef.current.set(key, tr);
             if (inBodyZone(f)) anyInZone = true;
             const m = detectMotionSign(tr);
@@ -215,8 +215,7 @@ function Translator() {
         if (experimental && target) {
           const left = frameBySide.get("Left"), right = frameBySide.get("Right");
           if (left && right) {
-            pairRef.current = pairRef.current.filter((f) => now - f.t < 1200);
-            pairRef.current.push({ t: now, left, right });
+            pairRef.current = updateMotionWindow(pairRef.current, { t: now, left, right }, (frame) => `${frame.left.shape}:${frame.right.shape}`);
           } else pairRef.current = [];
           const match = detectTwoHandSign(pairRef.current, target);
           const candidate: Classification = { label: match?.label ?? null, kind: "word", confidence: match?.confidence ?? 0 };
