@@ -2,9 +2,9 @@
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
 # Camera and quality upgrade
-- [ ] Improve camera selection, cancellation, recovery, and settings.
-- [ ] Reduce inference input cost, stabilize hand identities, and show measured tracking speed without weakening confirmation.
-- [ ] Expand supported-sign practice sequences and refine the conversation layout; verify camera and mobile flows.
+- [x] Add camera device selection, quality/mirror/overlay controls, generation-safe cancellation, disconnected/busy camera recovery, and GPU-to-CPU fallback. Browser verified camera startup, quality restart, mirror, stop, and delayed-request cancellation.
+- [x] Bound inference frame dimensions while retaining aspect ratio and every distinct frame, stabilize hand ordering, reuse brightness canvas, and show measured fps/inference time. Headless fake-camera test measured 1 fps / 987 ms; no 10x speedup or real-signing accuracy improvement established. Continuous 70%/over-two-second gate retained and browser verified.
+- [x] Expand from four to ten supported-sign practice sequences and refine the conversation layout; replies and 390px/771px/1280px layouts verified. All 43 selected tests pass. Full ASL recognition remains blocked above.
 
 # Competition improvements
 - [x] Add experimental, guided-practice-only Help, Nice / Clean, and Meet rules with two-hand safeguards; synthetic tests pass, physical signing accuracy is unverified.
