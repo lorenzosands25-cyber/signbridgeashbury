@@ -1,11 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Save, Trash2 } from "lucide-react";
+import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Save, Trash2, Volume2, VolumeX, Play, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
 import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useTranslationSpeech } from "@/hooks/use-translation-speech";
 
 export const Route = createFileRoute("/translator")({
   validateSearch: (s: Record<string, unknown>): { practice?: string } =>
@@ -13,9 +16,9 @@ export const Route = createFileRoute("/translator")({
   head: () => ({
     meta: [
       { title: "Live ASL Translator — Signa" },
-      { name: "description", content: "Point your camera at ASL handshapes and read them as text in real time." },
+      { name: "description", content: "Read supported ASL signs, hear translations with ElevenLabs, and type a response with Signa." },
       { property: "og:title", content: "Live ASL Translator — Signa" },
-      { property: "og:description", content: "Real-time, on-device ASL handshape recognition." },
+      { property: "og:description", content: "Live ASL text and spoken translations, with typed replies." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -55,6 +58,8 @@ function Translator() {
   const [handsView, setHandsView] = useState<{ side: string; cls: Classification }[]>([]);
   const smoothRef = useRef<{ x: number; y: number; z?: number }[][]>([]);
   const [text, setText] = useState("");
+  const [response, setResponse] = useState("");
+  const speech = useTranslationSpeech(text);
   const [lowLight, setLowLight] = useState(false);
 
   builder.current.threshold = settings.threshold;
@@ -351,10 +356,10 @@ function Translator() {
         )}
         <section aria-label="Live translation" className="rounded-[2rem] bg-card p-6 shadow-card">
           <div className="flex items-center justify-between">
-            <span className="flex items-center gap-2 text-xs font-extrabold tracking-widest text-muted-foreground">
+            <h2 className="flex items-center gap-2 text-xs font-extrabold tracking-widest text-muted-foreground">
               <span className={`h-2 w-2 rounded-full ${active ? "animate-pulse bg-success" : "bg-muted-foreground"}`} aria-hidden />
-              LIVE TRANSLATION {active ? "· ON" : "· OFF"}
-            </span>
+              Live Translation {active ? "· ON" : "· OFF"}
+            </h2>
             <span className="text-xs font-semibold text-muted-foreground">
               Confidence: {current?.label ? `${conf}%` : "—"}
             </span>
@@ -365,11 +370,28 @@ function Translator() {
           <p className="mt-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">
             {text.trim() ? text : <span className="text-muted-foreground/60">Recognized signs will appear here…</span>}
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <Button variant="ghost" size="icon" onClick={speech.toggle} aria-pressed={speech.enabled} aria-label={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"} title={speech.enabled ? "Mute automatic speech" : "Enable automatic speech"}>
+              {speech.enabled ? <Volume2 aria-hidden /> : <VolumeX aria-hidden />}
+            </Button>
+            <span className="mr-auto text-xs font-semibold text-muted-foreground" role="status">{speech.state === "loading" ? "Preparing voice…" : speech.state === "speaking" ? "Speaking…" : speech.enabled ? "ElevenLabs voice · On" : "ElevenLabs voice · Muted"}</span>
+            <Button variant="ghost" size="icon" disabled={!text.trim()} onClick={speech.replay} aria-label="Play translation" title="Play translation"><Play aria-hidden /></Button>
+            <Button variant="ghost" size="icon" disabled={speech.state === "idle"} onClick={speech.cancel} aria-label="Stop speaking" title="Stop speaking"><Square aria-hidden /></Button>
+          </div>
+          {speech.error && <p className="mt-2 break-words text-sm text-destructive" role="alert">{speech.error}</p>}
+          <p className="mt-1 text-xs text-muted-foreground">When voice is on, translated text is sent to ElevenLabs. Camera video stays on your device.</p>
           <div className="mt-5 grid grid-cols-3 gap-2">
             <button onClick={clear} disabled={!text} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-muted font-semibold transition active:scale-95 disabled:opacity-40"><Trash2 className="h-4 w-4" aria-hidden />Clear</button>
             <button onClick={copy} disabled={!text.trim()} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-muted font-semibold transition active:scale-95 disabled:opacity-40"><Copy className="h-4 w-4" aria-hidden />Copy</button>
             <button onClick={save} disabled={!text.trim()} className="flex h-12 items-center justify-center gap-2 rounded-2xl bg-brand font-semibold text-primary-foreground transition active:scale-95 disabled:opacity-40"><Save className="h-4 w-4" aria-hidden />Save</button>
           </div>
+        </section>
+        <section aria-label="Response" className="rounded-[2rem] bg-card p-6 shadow-card">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-xs font-extrabold tracking-widest text-muted-foreground"><label htmlFor="conversation-response">Response</label></h2>
+            <Button variant="ghost" size="icon" disabled={!response} onClick={() => setResponse("")} aria-label="Clear response" title="Clear response"><Trash2 aria-hidden /></Button>
+          </div>
+          <Textarea id="conversation-response" value={response} onChange={(e) => setResponse(e.target.value)} placeholder="Type your reply…" className="min-h-40 resize-y rounded-2xl bg-muted/40 text-2xl font-semibold leading-relaxed md:text-2xl" />
         </section>
         <section className="rounded-3xl border border-border p-5 text-sm">
           <p className="font-bold">What Signa recognizes today</p>
