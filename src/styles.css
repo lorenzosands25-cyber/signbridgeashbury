@@ -64,6 +64,8 @@
   --color-chart-5: var(--chart-5);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-camera: var(--camera);
+  --color-camera-foreground: var(--camera-foreground);
   --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
@@ -76,6 +78,8 @@
 }
 
 :root {
+  --camera: oklch(0.20 0.025 285);
+  --camera-foreground: oklch(0.98 0.005 285);
   --radius: 1.25rem;
   --background: oklch(0.975 0.01 290);
   --foreground: oklch(0.21 0.04 285);
@@ -117,6 +121,8 @@
 }
 
 .dark {
+  --camera: oklch(0.13 0.015 285);
+  --camera-foreground: oklch(0.98 0.005 285);
   --background: oklch(0.17 0.03 285);
   --foreground: oklch(0.97 0.01 290);
   --card: oklch(0.22 0.035 285);
