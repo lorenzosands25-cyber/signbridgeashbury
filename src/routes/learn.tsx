@@ -42,7 +42,9 @@ const categories: Record<string, Lesson[]> = {
   Alphabet: [
     { word: "A", how: "Closed fist with the thumb resting against the side of the index finger.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
     { word: "B", how: "Four fingers straight up and together, thumb folded across the palm.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
+    { word: "C", how: "Fingers and thumb curve together into a C shape, like holding a small cup.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
     { word: "D", how: "Index finger up; the other fingertips touch the thumb to form a circle.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
+    { word: "F", how: "Thumb and index fingertips touch in a circle; the other three fingers point up and spread.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
     { word: "I", how: "Fist with only the pinky finger raised.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
     { word: "L", how: "Index finger up and thumb out to the side, forming an L.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
     { word: "O", how: "All fingertips curve to touch the thumb, forming an O.", slug: "https://www.lifeprint.com/asl101/fingerspelling/abc.htm" },
