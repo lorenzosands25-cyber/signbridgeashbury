@@ -285,6 +285,11 @@ function Translator() {
                 ))}
               </div>
             )}
+            {!bodyVisible && (
+              <div className="absolute inset-x-4 bottom-24 rounded-2xl bg-card/90 px-3 py-2 text-center text-sm font-semibold text-foreground">
+                Step back so your head and shoulders are visible for word signs.
+              </div>
+            )}
             {lowLight && (
               <div className="absolute inset-x-4 bottom-24 flex items-center gap-2 rounded-2xl bg-warning px-3 py-2 text-sm font-semibold text-foreground">
                 <AlertTriangle className="h-4 w-4" aria-hidden /> It's quite dark — try more light for better accuracy.
@@ -369,9 +374,10 @@ function Translator() {
         <section className="rounded-3xl border border-border p-5 text-sm">
           <p className="font-bold">What Signa recognizes today</p>
           <p className="mt-1 text-muted-foreground">
-            This MVP reads static ASL handshapes — not full ASL sentences, movement signs or facial grammar. Both hands are tracked at once — the clearest sign is used. Hold each sign still for about half a second; lower your hand briefly to add a space or repeat a letter.
+            Signa now tracks your body too, so it knows when a hand is at your forehead, chin or chest and how it moves. It understands the word signs below plus fingerspelled letters — not yet all of ASL, full grammar or facial expressions. Keep your head and shoulders in view for word signs.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
+            {MOTION_SIGNS.map((s) => <span key={s} className="rounded-lg bg-secondary/20 px-2 py-1 text-xs font-bold text-foreground">{s}</span>)}
             {SUPPORTED_SIGNS.map((s) => <span key={s} className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-bold text-primary">{s}</span>)}
           </div>
         </section>
