@@ -2,8 +2,8 @@
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
 # Moving gesture matching
-- [ ] Improve continuous moving-gesture matching, including Yes, with regression tests.
-- [ ] Clarify whether over-65% matches are tentative suggestions or confirmed translations; new request also names 100% for translations.
+- [x] Improve continuous moving-gesture matching: chest-height Yes uses body-relative cumulative reversals, supports 10–120 fps samples, rejects jitter/body shifts, and retains Sorry precedence. Motion requires 600ms and six samples rather than twelve; no confirmation thresholds lowered. 54 ASL tests pass; simulated moving-camera flow shows tentative Yes before gated text, then clears stale suggestions when motion stops. Physical-signing accuracy remains unverified.
+- [x] User chose tentative suggestions strictly above 65%, separate from Live Translation and speech. Handshape confidence caps movement confidence; 70% for over two seconds still gates every translation, and experimental two-hand practice keeps its original confidence floor.
 
 # Camera and quality upgrade
 - [x] Add camera device selection, quality/mirror/overlay controls, generation-safe cancellation, disconnected/busy camera recovery, and GPU-to-CPU fallback. Browser verified camera startup, quality restart, mirror, stop, and delayed-request cancellation.

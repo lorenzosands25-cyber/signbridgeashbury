@@ -3,7 +3,8 @@ import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Sav
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
-import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
+import { detectMotionSign, inBodyZone, isMoving, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
+import { tentativeSuggestion } from "@/lib/asl/suggestion";
 import { detectTwoHandSign, type PairedFrame } from "@/lib/asl/two-hand";
 import { updateMotionWindow } from "@/lib/asl/motion-window";
 import { needsDisplayUpdate, sameDisplayedClassification } from "@/lib/asl/live-display";
@@ -257,6 +258,7 @@ function Translator() {
         // Movement + body-location signs (Please, Thank you, …) per hand.
         let motionHit: { label: string; confidence: number; source: string } | null = null;
         let anyInZone = false;
+        let anyMoving = false;
         const frameBySide = new Map<string, Frame>();
         if (body) {
           const seen = new Set<string>();
@@ -266,7 +268,7 @@ function Translator() {
             if (!result || !tip || !indexTip || !body) return;
             const key = result.side;
             seen.add(key);
-            const l = result.cls.confidence >= Math.max(0.7, settings.threshold) ? result.cls.label : null;
+            const l = tentativeSuggestion(result.cls)?.label;
             const shape: Shape = l === "B" || l === "5" ? "open" : l === "A" || l === "S" ? "fist" : l === "D" ? "index" : "other";
             const palmIdx = [0, 5, 9, 13, 17];
             const palm = { x: palmIdx.reduce((a, j) => a + (hand[j]?.x ?? 0), 0) / 5 * W, y: palmIdx.reduce((a, j) => a + (hand[j]?.y ?? 0), 0) / 5 * H };
@@ -279,11 +281,12 @@ function Translator() {
               const length = Math.hypot(nx, ny, nz);
               if (length > 0) palmNormal = { x: nx / length, y: ny / length, z: nz / length };
             }
-            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body, ...(palmNormal ? { palmNormal } : {}), thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
+            const f: Frame = { t: now, shape, shapeConfidence: result.cls.confidence, palm, tip: px(tip), indexTip: px(indexTip), body, ...(palmNormal ? { palmNormal } : {}), thumbUp: !!(thumb && thumbJoint && thumb.y < thumbJoint.y - 0.1 * body.sw / H) };
             frameBySide.set(result.side, f);
             const tr = updateMotionWindow(tracksRef.current.get(key) ?? [], f, (frame) => frame.shape);
             tracksRef.current.set(key, tr);
             if (inBodyZone(f)) anyInZone = true;
+            if (isMoving(tr)) anyMoving = true;
             const m = detectMotionSign(tr);
             if (m && (!motionHit || m.confidence > motionHit.confidence)) motionHit = { ...m, source: key };
           });
@@ -291,7 +294,7 @@ function Translator() {
         } else { tracksRef.current.clear(); pairRef.current = []; }
         if (experimental && target) {
           const left = frameBySide.get("Left"), right = frameBySide.get("Right");
-          if (left && right) {
+          if (left && right && (left.shapeConfidence ?? 0) >= Math.max(0.7, settings.threshold) && (right.shapeConfidence ?? 0) >= Math.max(0.7, settings.threshold)) {
             pairRef.current = updateMotionWindow(pairRef.current, { t: now, left, right }, (frame) => `${frame.left.shape}:${frame.right.shape}`);
           } else pairRef.current = [];
           const match = detectTwoHandSign(pairRef.current, target);
@@ -319,10 +322,11 @@ function Translator() {
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
-        if (anyInZone) {
+        if (anyInZone || anyMoving) {
           // Hand is at the face/chest: wait for a full body sign instead of reading letters.
           builder.current.push({ label: null, kind: "word", confidence: 0 }, now);
-          publishTracking(null, "tracking", now);
+          const possible = anyInZone ? null : tentativeSuggestion(results.find((r) => r.cls.label)?.cls ?? null);
+          publishTracking(possible, "tracking", now);
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
@@ -443,6 +447,7 @@ function Translator() {
   const active = cam === "on";
   const busy = cam === "requesting" || cam === "loading-model";
   const conf = current?.label ? Math.round(current.confidence * 100) : 0;
+  const suggestion = active && status !== "recognized" ? tentativeSuggestion(current) : null;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -506,6 +511,10 @@ function Translator() {
           <section aria-label="Live translation" className="border-b border-border pb-6">
             <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="flex items-center gap-2 text-sm font-bold"><span className={`h-2 w-2 rounded-full ${active ? "bg-success" : "bg-muted-foreground"}`} />Live Translation</h2><span className="text-xs font-semibold text-muted-foreground">{active ? "Live" : "Camera off"}</span></div>
             <p className="my-5 min-h-24 break-words text-3xl font-bold leading-snug" aria-live="polite">{text.trim() ? text : <span className="text-muted-foreground/60">Waiting for a confirmed sign…</span>}</p>
+            <div aria-label="Tentative match" className="mb-3 flex min-h-10 flex-wrap items-center justify-between gap-2 border-l-2 border-secondary pl-3 text-sm">
+              <span className="text-muted-foreground">Possible sign · not confirmed</span>
+              <span className="font-semibold text-foreground">{suggestion ? `${suggestion.label} · ${Math.round(suggestion.confidence * 100)}%` : "—"}</span>
+            </div>
             <div className="space-y-2 rounded-lg bg-muted/60 p-3">
               <div className="flex flex-wrap justify-between gap-2 text-xs font-semibold"><span>{status === "recognized" ? "Sign confirmed" : status === "tracking" && current?.label ? "Confirming…" : "Awaiting a clear match"}</span><span className="text-muted-foreground">Rule match {current?.label ? `${conf}%` : "—"}</span></div>
               <progress aria-label="Sign confirmation progress" value={status === "tracking" || status === "recognized" ? progress : 0} max={1} className="confirmation-meter h-1.5 w-full" />

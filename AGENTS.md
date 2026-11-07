@@ -35,3 +35,4 @@ use the editor.
 - Single and paired motion buffers use the shared shape-aware window helper to discard changed-shape or interrupted evidence immediately, preventing stale movement matches without lowering confirmation thresholds.
 - Display updates are deduplicated and rate-limited separately from per-video-frame recognition; parallel model initialization and resize-only canvas allocation reduce overhead without thinning recognition evidence.
 - Camera constraints and aspect-preserving inference sizing live in a shared browser-safe helper; camera requests are generation-cancelled and hand tracks sorted by handedness to prevent races and false evidence resets.
+- Tentative matches use a display-only confidence filter and never feed speech or practice advancement; motion confidence is capped by observed handshape evidence, and Yes uses body-relative cumulative reversals rather than frame-dependent deltas.
