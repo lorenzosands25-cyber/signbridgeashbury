@@ -59,6 +59,8 @@ function Translator() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef(0);
+  const mountedRef = useRef(true);
+  const [activeFacing, setActiveFacing] = useState<"user" | "environment">("user");
   const modelPromiseRef = useRef<Promise<void> | null>(null);
   const inputRef = useRef<HTMLCanvasElement | null>(null);
   const lightRef = useRef<HTMLCanvasElement | null>(null);
@@ -102,7 +104,7 @@ function Translator() {
   }, []);
 
   builder.current.threshold = settings.threshold;
-  const mirrored = settings.mirror && settings.facingMode === "user";
+  const mirrored = settings.mirror && activeFacing === "user";
 
   useEffect(() => {
     setPracticeStep(0);
@@ -145,7 +147,10 @@ function Translator() {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  useEffect(() => () => { stop(); landmarkerRef.current?.close(); poseRef.current?.close(); }, [stop]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; stop(); landmarkerRef.current?.close(); poseRef.current?.close(); };
+  }, [stop]);
 
   useEffect(() => {
     const refresh = async () => {
@@ -373,6 +378,7 @@ function Translator() {
       const v = videoRef.current;
       if (!v) { stop(); return; }
       const track = acquired.getVideoTracks()[0];
+      setActiveFacing(track?.getSettings().facingMode === "environment" ? "environment" : facing);
       if (track) track.onended = () => {
         if (request !== requestRef.current) return;
         stop(); setCam("error"); setErrMsg("Camera disconnected. Reconnect it or choose another camera.");
@@ -381,8 +387,9 @@ function Translator() {
       await v.play();
       if (request !== requestRef.current) return;
       setResolution(`${v.videoWidth} × ${v.videoHeight}`);
-      setDevices((await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput"));
-      if (!landmarkerRef.current) {
+      try { setDevices((await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput")); } catch { /* Device labels are optional. */ }
+      if (request !== requestRef.current) return;
+      if (!landmarkerRef.current || !poseRef.current) {
         setCam("loading-model");
         if (!modelPromiseRef.current) {
           modelPromiseRef.current = (async () => {
@@ -395,7 +402,8 @@ function Translator() {
             const pose = (delegate: "GPU" | "CPU") => PoseLandmarker.createFromOptions(fileset, {
               baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate }, runningMode: "VIDEO", numPoses: 1,
             });
-            const [handModel, poseModel] = await Promise.all([hands("GPU").catch(() => hands("CPU")), pose("GPU").catch(() => pose("CPU")).catch(() => null)]);
+            const [handModel, poseModel] = await Promise.all([landmarkerRef.current ? Promise.resolve(landmarkerRef.current) : hands("GPU").catch(() => hands("CPU")), pose("GPU").catch(() => pose("CPU")).catch(() => null)]);
+            if (!mountedRef.current) { handModel.close(); poseModel?.close(); return; }
             landmarkerRef.current = handModel; poseRef.current = poseModel;
           })().finally(() => { modelPromiseRef.current = null; });
         }
@@ -405,7 +413,6 @@ function Translator() {
       setBodyModelReady(!!poseRef.current);
       metricsRef.current = { start: 0, frames: 0, total: 0 };
       setCam("on");
-      rafRef.current = requestAnimationFrame(loop);
     } catch (error) {
       acquired?.getTracks().forEach((t) => t.stop());
       if (request !== requestRef.current) return;
@@ -525,7 +532,7 @@ function Translator() {
       <section className="border-t border-border pt-6" aria-label="Guided practice">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">Phrase practice</h2><span className="text-xs font-semibold text-muted-foreground">Selected sign sequences · experimental two-hand matches</span></div>
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
-          <Select value={signs.length ? practice : "free"} onValueChange={(value) => navigate({ search: value === "free" ? {} : { practice: value } })}>
+          <Select value={signs.length && practice ? practice : "free"} onValueChange={(value) => navigate({ search: value === "free" ? {} : { practice: value } })}>
             <SelectTrigger aria-label="Phrase practice sequence"><SelectValue placeholder="Choose practice" /></SelectTrigger>
             <SelectContent><SelectItem value="free">Free conversation</SelectItem>{[...PHRASE_PRACTICES.map((p) => p.title), ...TWO_HAND_SIGNS].map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent>
           </Select>

@@ -18,7 +18,7 @@ export function inferenceSize(width: number, height: number, quality: CameraQual
 }
 
 export function cameraError(error: unknown): { state: "denied" | "unavailable" | "error"; message: string } {
-  const name = error instanceof Error ? error.name : "";
+  const name = typeof error === "object" && error !== null && "name" in error ? error.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") return { state: "denied", message: "Camera permission is blocked. Allow camera access in your browser's site settings, then retry." };
   if (name === "NotReadableError" || name === "AbortError") return { state: "error", message: "Your camera is busy. Close other camera apps or tabs, then retry." };
   if (name === "NotFoundError" || name === "OverconstrainedError") return { state: "unavailable", message: "This camera is unavailable. Choose another camera or the default camera, then retry." };
