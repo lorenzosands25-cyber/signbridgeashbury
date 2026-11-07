@@ -31,5 +31,10 @@ describe("phrase practice order", () => {
   it("supports individual practice without inventing a phrase", () => {
     expect(practiceSigns("Meet")).toEqual(["Meet"]);
     expect(practiceSigns()).toEqual([]);
+    expect(practiceSigns("unsupported phrase")).toEqual([]);
+  });
+  it("uses existing signs for the longer help sequence", () => {
+    expect(practiceSigns("Hello, please help")).toEqual(["Hello", "Please", "Help"]);
+    expect(advancePractice(practiceSigns("Hello, please help"), 0, "Please")).toBe(0);
   });
 });

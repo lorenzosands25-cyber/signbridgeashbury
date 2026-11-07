@@ -1,6 +1,11 @@
 # Full ASL phrases and movements
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
+# Camera and quality upgrade
+- [ ] Improve camera selection, cancellation, recovery, and settings.
+- [ ] Reduce inference input cost, stabilize hand identities, and show measured tracking speed without weakening confirmation.
+- [ ] Expand supported-sign practice sequences and refine the conversation layout; verify camera and mobile flows.
+
 # Competition improvements
 - [x] Add experimental, guided-practice-only Help, Nice / Clean, and Meet rules with two-hand safeguards; synthetic tests pass, physical signing accuracy is unverified.
 - [x] Add four multi-sign practice sequences that advance only on confirmed signs, without guessing English sentences.

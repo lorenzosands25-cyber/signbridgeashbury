@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 export type HistoryItem = { id: string; text: string; createdAt: number; confidence: number; favorite: boolean };
 export type Settings = {
   facingMode: "user" | "environment";
+  cameraQuality: "balanced" | "detail";
   mirror: boolean;
   threshold: number;
   showLandmarks: boolean;
@@ -12,6 +13,7 @@ export type Settings = {
 
 export const defaultSettings: Settings = {
   facingMode: "user",
+  cameraQuality: "balanced",
   mirror: true,
   threshold: 0.7,
   showLandmarks: true,
