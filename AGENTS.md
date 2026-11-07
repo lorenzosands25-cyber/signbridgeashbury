@@ -32,3 +32,4 @@ use the editor.
 - All letter and motion candidates pass through SentenceBuilder's continuous wall-clock gate; reset evidence on low confidence, source changes, camera transitions, or sample gaps to avoid stale confirmations.
 - Speech uses a validated server function with the linked ElevenLabs credential; only committed SentenceBuilder text enters the cancelable, serialized client playback queue, keeping secrets and camera frames out of speech requests.
 - Experimental two-hand rules are target-restricted to guided practice; paired landmarks must be synchronized, and phrase steps advance only from SentenceBuilder commits to avoid treating unvalidated heuristics as general ASL translation.
+- Single and paired motion buffers use the shared shape-aware window helper to discard changed-shape or interrupted evidence immediately, preventing stale movement matches without lowering confirmation thresholds.
