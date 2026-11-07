@@ -1,6 +1,11 @@
 # Full ASL phrases and movements
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
+# Competition improvements
+- [ ] Add bounded two-hand signs with safeguards and automated checks.
+- [ ] Add multi-sign phrase practice without guessing English sentences.
+- [ ] Polish the live conversation screen and verify desktop/mobile flows.
+
 # Recognition accuracy
 - [x] Require continuous 70% confidence for more than two seconds for every committed sign.
 - [x] Reduce false matches and prevent mixing hand tracks or stale frames.
