@@ -3,6 +3,7 @@ import { AlertTriangle, Camera, CameraOff, Check, Copy, Loader2, RefreshCcw, Sav
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/asl/classifier";
+import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
 
@@ -41,6 +42,10 @@ function Translator() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const landmarkerRef = useRef<any>(null);
+  const poseRef = useRef<any>(null);
+  const tracksRef = useRef(new Map<string, Frame[]>());
+  const [bodyVisible, setBodyVisible] = useState(false);
+  const [lastWord, setLastWord] = useState<string | null>(null);
   const rafRef = useRef<number>(0);
   const builder = useRef(new SentenceBuilder());
   const [cam, setCam] = useState<CamState>("off");
@@ -87,6 +92,26 @@ function Translator() {
         return sm;
       });
       smoothRef.current = hands;
+      // Body reference from pose: shoulders, mouth and forehead in pixel space.
+      const W = c.width, H = c.height;
+      const px = (p: { x: number; y: number }) => ({ x: p.x * W, y: p.y * H });
+      let body: Body | null = null;
+      const pose = poseRef.current?.detectForVideo(v, now)?.landmarks?.[0] as { x: number; y: number }[] | undefined;
+      if (pose && pose[11] && pose[12] && pose[9] && pose[10] && pose[2] && pose[5]) {
+        const ls = px(pose[11]), rs = px(pose[12]);
+        const mouth = { x: (pose[9].x + pose[10].x) / 2 * W, y: (pose[9].y + pose[10].y) / 2 * H };
+        const eye = { x: (pose[2].x + pose[5].x) / 2 * W, y: (pose[2].y + pose[5].y) / 2 * H };
+        const sw = Math.hypot(ls.x - rs.x, ls.y - rs.y);
+        if (sw > 20) body = { sw, mouth, forehead: { x: eye.x, y: eye.y - (mouth.y - eye.y) }, shoulderMid: { x: (ls.x + rs.x) / 2, y: (ls.y + rs.y) / 2 } };
+      }
+      setBodyVisible(!!body);
+      if (body && settings.showLandmarks) {
+        ctx.strokeStyle = "rgba(121,87,255,0.5)"; ctx.lineWidth = 2; ctx.setLineDash([6, 6]);
+        ctx.beginPath(); ctx.arc(body.forehead.x, body.forehead.y, 0.45 * body.sw, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(body.mouth.x, body.mouth.y, 0.4 * body.sw, 0, 7); ctx.stroke();
+        ctx.strokeRect(body.shoulderMid.x - 0.65 * body.sw, body.shoulderMid.y + 0.05 * body.sw, 1.3 * body.sw, 1.05 * body.sw);
+        ctx.setLineDash([]);
+      }
       if (hands.length) {
         const colors = ["rgba(99,230,213,0.9)", "rgba(64,183,255,0.9)"];
         const results = hands.map((hand, i) => {
@@ -103,6 +128,45 @@ function Translator() {
           return { side, cls: classifyHandshape(hand) };
         });
         setHandsView(results);
+        // Movement + body-location signs (Please, Thank you, …) per hand.
+        let motionHit: { label: string; confidence: number } | null = null;
+        let anyInZone = false;
+        if (body) {
+          const seen = new Set<string>();
+          hands.forEach((hand, i) => {
+            const key = results[i]!.side + i;
+            seen.add(key);
+            const l = results[i]!.cls.label;
+            const shape: Shape = l === "B" || l === "5" ? "open" : l === "A" || l === "S" ? "fist" : l === "D" ? "index" : "other";
+            const palmIdx = [0, 5, 9, 13, 17];
+            const palm = { x: palmIdx.reduce((a, j) => a + hand[j]!.x, 0) / 5 * W, y: palmIdx.reduce((a, j) => a + hand[j]!.y, 0) / 5 * H };
+            const f: Frame = { t: now, shape, palm, tip: px(hand[12]!), indexTip: px(hand[8]!), body: body! };
+            const tr = (tracksRef.current.get(key) ?? []).filter((x) => now - x.t < 1200);
+            tr.push(f);
+            tracksRef.current.set(key, tr);
+            if (inBodyZone(f)) anyInZone = true;
+            const m = detectMotionSign(tr);
+            if (m && (!motionHit || m.confidence > motionHit.confidence)) { motionHit = m; tracksRef.current.set(key, []); }
+          });
+          for (const k of tracksRef.current.keys()) if (!seen.has(k)) tracksRef.current.delete(k);
+        }
+        if (motionHit) {
+          const mh = motionHit as { label: string; confidence: number };
+          if (builder.current.commitWord(mh.label, mh.confidence, now)) {
+            setText(builder.current.text);
+            setLastWord(mh.label);
+            setCurrent({ label: mh.label, kind: "word", confidence: mh.confidence });
+            setStatus("recognized");
+          } else if (mh.confidence < settings.threshold) setStatus("low-confidence");
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
+        if (anyInZone) {
+          // Hand is at the face/chest: wait for a full body sign instead of reading letters.
+          setStatus("tracking");
+          rafRef.current = requestAnimationFrame(loop);
+          return;
+        }
         // The sentence uses whichever hand shows the most confident recognized sign.
         const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0]!.cls;
         setCurrent(best);
@@ -126,7 +190,7 @@ function Translator() {
       }
     }
     rafRef.current = requestAnimationFrame(loop);
-  }, [settings.showLandmarks, text]);
+  }, [settings.showLandmarks, settings.threshold, text]);
 
   const start = useCallback(async (facing = settings.facingMode) => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -143,7 +207,7 @@ function Translator() {
       await v.play();
       if (!landmarkerRef.current) {
         setCam("loading-model");
-        const { FilesetResolver, HandLandmarker } = await import("@mediapipe/tasks-vision");
+        const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
         const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
         landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
@@ -153,6 +217,15 @@ function Translator() {
           minHandPresenceConfidence: 0.6,
           minTrackingConfidence: 0.5,
         });
+        try {
+          poseRef.current = await PoseLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
+            runningMode: "VIDEO",
+            numPoses: 1,
+          });
+        } catch {
+          poseRef.current = null; // Body signs unavailable; letters still work.
+        }
       }
       setCam("on");
       rafRef.current = requestAnimationFrame(loop);
@@ -212,6 +285,11 @@ function Translator() {
                 ))}
               </div>
             )}
+            {!bodyVisible && (
+              <div className="absolute inset-x-4 bottom-24 rounded-2xl bg-card/90 px-3 py-2 text-center text-sm font-semibold text-foreground">
+                Step back so your head and shoulders are visible for word signs.
+              </div>
+            )}
             {lowLight && (
               <div className="absolute inset-x-4 bottom-24 flex items-center gap-2 rounded-2xl bg-warning px-3 py-2 text-sm font-semibold text-foreground">
                 <AlertTriangle className="h-4 w-4" aria-hidden /> It's quite dark — try more light for better accuracy.
@@ -266,8 +344,8 @@ function Translator() {
           <div className="rounded-3xl border-2 border-primary/30 bg-card p-5" role="status">
             <p className="text-sm font-semibold text-muted-foreground">Practice</p>
             <p className="text-lg font-bold">Sign "{practice}"</p>
-            <p className={`mt-1 font-semibold ${current?.label === practice && status === "recognized" ? "text-success" : "text-muted-foreground"}`}>
-              {current?.label === practice && status === "recognized" ? <><Check className="mr-1 inline h-4 w-4" aria-hidden />Great — recognized!</> : "Hold the handshape steady in the frame."}
+            <p className={`mt-1 font-semibold ${(current?.label === practice && status === "recognized") || lastWord === practice ? "text-success" : "text-muted-foreground"}`}>
+              {(current?.label === practice && status === "recognized") || lastWord === practice ? <><Check className="mr-1 inline h-4 w-4" aria-hidden />Great — recognized!</> : "Hold the handshape steady in the frame."}
             </p>
           </div>
         )}
@@ -296,9 +374,10 @@ function Translator() {
         <section className="rounded-3xl border border-border p-5 text-sm">
           <p className="font-bold">What Signa recognizes today</p>
           <p className="mt-1 text-muted-foreground">
-            This MVP reads static ASL handshapes — not full ASL sentences, movement signs or facial grammar. Both hands are tracked at once — the clearest sign is used. Hold each sign still for about half a second; lower your hand briefly to add a space or repeat a letter.
+            Signa now tracks your body too, so it knows when a hand is at your forehead, chin or chest and how it moves. It understands the word signs below plus fingerspelled letters — not yet all of ASL, full grammar or facial expressions. Keep your head and shoulders in view for word signs.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
+            {MOTION_SIGNS.map((s) => <span key={s} className="rounded-lg bg-secondary/20 px-2 py-1 text-xs font-bold text-foreground">{s}</span>)}
             {SUPPORTED_SIGNS.map((s) => <span key={s} className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-bold text-primary">{s}</span>)}
           </div>
         </section>

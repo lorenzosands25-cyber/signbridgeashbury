@@ -41,6 +41,18 @@ export class SentenceBuilder {
     return { status: "recognized", committed: c.label };
   }
 
+  private lastWordAt = new Map<string, number>();
+  /** Commit a whole word from the movement detector (already confidence-checked). */
+  commitWord(label: string, confidence: number, now: number): boolean {
+    if (confidence < this.threshold) return false;
+    if (now - (this.lastWordAt.get(label) ?? -1e9) < 1500) return false;
+    this.lastWordAt.set(label, now);
+    this.text = (this.text.trimEnd() + " " + label + " ").trimStart();
+    this.confidences.push(confidence);
+    this.run = { label: null, n: 0, sum: 0 };
+    return true;
+  }
+
   /** Allow repeating the same letter (e.g. "LL") by lowering the hand briefly. */
   get averageConfidence() {
     return this.confidences.length ? this.confidences.reduce((a, b) => a + b, 0) / this.confidences.length : 0;

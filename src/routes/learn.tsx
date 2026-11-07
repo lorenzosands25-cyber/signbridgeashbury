@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ExternalLink, Play } from "lucide-react";
 import { useState } from "react";
 import { SUPPORTED_SIGNS } from "@/lib/asl/classifier";
+import { MOTION_SIGNS } from "@/lib/asl/motion";
 
 export const Route = createFileRoute("/learn")({
   head: () => ({
@@ -77,7 +78,7 @@ function Learn() {
       </div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {(categories[cat] ?? []).map((l, i) => {
-          const practicable = (SUPPORTED_SIGNS as readonly string[]).includes(l.word);
+          const practicable = ([...SUPPORTED_SIGNS, ...MOTION_SIGNS] as readonly string[]).includes(l.word);
           return (
             <article key={l.word} className="animate-rise flex flex-col rounded-3xl bg-card p-5 shadow-card" style={{ animationDelay: `${i * 50}ms` }}>
               <div className="grid h-24 place-items-center rounded-2xl bg-primary/10 text-4xl font-extrabold text-primary">{l.word}</div>
