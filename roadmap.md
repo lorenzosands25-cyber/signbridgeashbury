@@ -7,6 +7,7 @@
 - [x] Polish the conversation screen, add quick replies and confirmation progress; camera startup, phrase selection, replies, and desktop/mobile layout verified; 33 tests pass.
 
 # Recognition accuracy
+- [x] Parallelize model loading, deduplicate/rate-limit display-only updates, eliminate repeated canvas resizing, and reset evidence between phrase steps. Fake-camera benchmark reduced canvas resets from 8 to 0 over three seconds but processed frames remained 4; no 10x speedup established. Recognition thresholds and per-frame inference retained.
 - [x] Reset old single/two-hand motion evidence on the first changed-handshape frame, retaining the 600ms motion evidence and 70%/over-two-second confirmation thresholds; 33 recognition tests and camera/layout checks pass. Physical signing accuracy remains unverified.
 - [x] Require continuous 70% confidence for more than two seconds for every committed sign.
 - [x] Reduce false matches and prevent mixing hand tracks or stale frames.

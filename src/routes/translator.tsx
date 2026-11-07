@@ -6,6 +6,7 @@ import { classifyHandshape, SUPPORTED_SIGNS, type Classification } from "@/lib/a
 import { detectMotionSign, inBodyZone, MOTION_SIGNS, type Body, type Frame, type Shape } from "@/lib/asl/motion";
 import { detectTwoHandSign, type PairedFrame } from "@/lib/asl/two-hand";
 import { updateMotionWindow } from "@/lib/asl/motion-window";
+import { needsDisplayUpdate, sameDisplayedClassification } from "@/lib/asl/live-display";
 import { advancePractice, practiceSigns, PHRASE_PRACTICES, TWO_HAND_SIGNS } from "@/lib/asl/practice";
 import { SentenceBuilder, type BuilderStatus } from "@/lib/asl/sentence";
 import { useHistory, useSettings } from "@/lib/store";
@@ -74,6 +75,16 @@ function Translator() {
   const [response, setResponse] = useState("");
   const speech = useTranslationSpeech(text);
   const [lowLight, setLowLight] = useState(false);
+  const displayRef = useRef({ last: -Infinity, key: "" });
+
+  const publishTracking = useCallback((candidate: Classification | null, nextStatus: BuilderStatus, now: number) => {
+    const key = `${nextStatus}:${candidate?.kind ?? ""}:${candidate?.label ?? ""}`;
+    if (!needsDisplayUpdate(now, displayRef.current.last, displayRef.current.key, key)) return;
+    displayRef.current = { last: now, key };
+    setCurrent((previous) => sameDisplayedClassification(previous, candidate) ? previous : candidate);
+    setStatus(nextStatus);
+    setProgress(builder.current.confirmationProgress);
+  }, []);
 
   builder.current.threshold = settings.threshold;
   const mirrored = settings.mirror && settings.facingMode === "user";
@@ -85,6 +96,16 @@ function Translator() {
     pairRef.current = [];
     setProgress(0);
   }, [practice]);
+
+  useEffect(() => {
+    builder.current.resetTracking();
+    tracksRef.current.clear();
+    pairRef.current = [];
+    displayRef.current = { last: -Infinity, key: "" };
+    setProgress(0);
+    setCurrent(null);
+    setStatus("idle");
+  }, [practiceStep]);
 
   const stop = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -108,12 +129,12 @@ function Translator() {
   const loop = useCallback(() => {
     const v = videoRef.current, c = canvasRef.current, lmk = landmarkerRef.current;
     if (!v || !c || !lmk || !streamRef.current) return;
-    setProgress(builder.current.confirmationProgress);
     if (v.readyState >= 2 && v.currentTime !== videoTimeRef.current) {
       videoTimeRef.current = v.currentTime;
       const now = performance.now();
       const res = lmk.detectForVideo(v, now);
-      c.width = v.videoWidth; c.height = v.videoHeight;
+      if (c.width !== v.videoWidth) c.width = v.videoWidth;
+      if (c.height !== v.videoHeight) c.height = v.videoHeight;
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, c.width, c.height);
@@ -176,7 +197,7 @@ function Translator() {
           // MediaPipe x/z use image width; y uses image height. Equalize axes.
           return { side, cls: classifyHandshape(hand.map((p) => ({ ...p, x: p.x * W / H, z: (p.z ?? 0) * W / H }))) };
         });
-        setHandsView(results);
+        setHandsView((previous) => previous.length === results.length && previous.every((hand, i) => hand.side === results[i]?.side) ? previous : results);
         // Movement + body-location signs (Please, Thank you, …) per hand.
         let motionHit: { label: string; confidence: number; source: string } | null = null;
         let anyInZone = false;
@@ -219,9 +240,8 @@ function Translator() {
           } else pairRef.current = [];
           const match = detectTwoHandSign(pairRef.current, target);
           const candidate: Classification = { label: match?.label ?? null, kind: "word", confidence: match?.confidence ?? 0 };
-          setCurrent(candidate);
           const r = builder.current.push(candidate, now, "guided-pair");
-          setStatus(r.status);
+          publishTracking(candidate, r.status, now);
           if (r.committed) {
             setText(builder.current.text);
             setCommittedCount((n) => n + 1);
@@ -233,9 +253,8 @@ function Translator() {
         if (motionHit) {
           const mh = motionHit as { label: string; confidence: number; source: string };
           const candidate: Classification = { label: mh.label, kind: "word", confidence: mh.confidence };
-          setCurrent(candidate);
           const r = builder.current.push(candidate, now, mh.source);
-          setStatus(r.status);
+          publishTracking(candidate, r.status, now);
           if (r.committed) {
             setText(builder.current.text);
             setCommittedCount((n) => n + 1);
@@ -247,28 +266,25 @@ function Translator() {
         if (anyInZone) {
           // Hand is at the face/chest: wait for a full body sign instead of reading letters.
           builder.current.push({ label: null, kind: "word", confidence: 0 }, now);
-          setCurrent(null);
-          setStatus("tracking");
+          publishTracking(null, "tracking", now);
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
         // The sentence uses whichever hand shows the most confident recognized sign.
         const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0];
         if (!best) return;
-        setCurrent(best.cls);
         const r = builder.current.push(best.cls, now, best.side);
-        setStatus(r.status);
+        publishTracking(best.cls, r.status, now);
         if (r.committed) {
           setText(builder.current.text);
           setCommittedCount((n) => n + 1);
           setPracticeStep((step) => advancePractice(signs, step, r.committed ?? ""));
         }
       } else {
-        setHandsView([]);
-        setCurrent(null);
+        setHandsView((previous) => previous.length ? [] : previous);
         const r = builder.current.push(null, now);
-        setStatus(r.status);
-        if (builder.current.text !== text) setText(builder.current.text);
+        publishTracking(null, r.status, now);
+        setText((previous) => previous === builder.current.text ? previous : builder.current.text);
       }
       // Cheap brightness check every ~60 frames
       if (Math.floor(now / 1000) % 3 === 0 && Math.random() < 0.05) {
@@ -282,7 +298,7 @@ function Translator() {
       }
     }
     rafRef.current = requestAnimationFrame(loop);
-  }, [settings.showLandmarks, settings.threshold, text, practice, practiceStep]);
+  }, [settings.showLandmarks, settings.threshold, practice, practiceStep, publishTracking]);
 
   const start = useCallback(async (facing = settings.facingMode) => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -309,23 +325,20 @@ function Translator() {
         setCam("loading-model");
         const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
         const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/wasm");
-        landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
+        const [handModel, poseModel] = await Promise.all([HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
           runningMode: "VIDEO",
           numHands: 2,
           minHandDetectionConfidence: 0.6,
           minHandPresenceConfidence: 0.6,
           minTrackingConfidence: 0.5,
-        });
-        try {
-          poseRef.current = await PoseLandmarker.createFromOptions(fileset, {
+        }), PoseLandmarker.createFromOptions(fileset, {
             baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task", delegate: "GPU" },
             runningMode: "VIDEO",
             numPoses: 1,
-          });
-        } catch {
-          poseRef.current = null; // Body signs unavailable; letters still work.
-        }
+          }).catch(() => null)]);
+        landmarkerRef.current = handModel;
+        poseRef.current = poseModel; // Body signs unavailable if pose loading fails; letters still work.
       }
       setCam("on");
       rafRef.current = requestAnimationFrame(loop);
