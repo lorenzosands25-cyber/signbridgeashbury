@@ -2,6 +2,41 @@ import { describe, expect, it } from "vitest";
 import { SentenceBuilder } from "./sentence";
 
 describe("SentenceBuilder", () => {
+  it("accepts a tentative word above 65% when a different sign appears", () => {
+    const b = new SentenceBuilder();
+    b.push({ label: "Yes", kind: "word", confidence: 0.66 }, 0, "Left", true);
+    expect(b.text).toBe("");
+    expect(b.push({ label: "Please", kind: "word", confidence: 0.8 }, 100, "Left", true).committed).toBe("Yes");
+    expect(b.text).toBe("Yes ");
+    expect(b.push({ label: "Help", kind: "word", confidence: 0.8 }, 200, "Left", true).committed).toBe("Please");
+    expect(b.text).toBe("Yes Please ");
+  });
+  it("does not accept guesses at 65%, on lost hands, or from a different hand", () => {
+    const a = { label: "Yes", kind: "word" as const, confidence: 0.66 };
+    const next = { ...a, label: "Please" };
+    for (const interrupt of ["low", "lost", "source", "gap", "reset"] as const) {
+      const b = new SentenceBuilder();
+      b.push(a, 0, "Left", true);
+      if (interrupt === "low") b.push({ ...a, confidence: 0.65 }, 50, "Left", true);
+      if (interrupt === "lost") b.push(null, 50, "Left", true);
+      if (interrupt === "reset") b.resetTracking();
+      b.push(next, interrupt === "gap" ? 501 : 100, interrupt === "source" ? "Right" : "Left", true);
+      expect(b.text).toBe("");
+    }
+  });
+  it("does not duplicate an already held-and-confirmed sign on transition", () => {
+    const b = new SentenceBuilder();
+    for (let t = 0; t <= 2100; t += 100) b.push({ label: "Yes", kind: "word", confidence: 0.8 }, t, "Left", true);
+    expect(b.text).toBe("Yes ");
+    b.push({ label: "Please", kind: "word", confidence: 0.8 }, 2200, "Left", true);
+    expect(b.text).toBe("Yes ");
+  });
+  it("retains the duration gate in guided practice when signs change", () => {
+    const b = new SentenceBuilder();
+    b.push({ label: "Yes", kind: "word", confidence: 0.8 }, 0, "Left", false);
+    b.push({ label: "Please", kind: "word", confidence: 0.8 }, 100, "Left", false);
+    expect(b.text).toBe("");
+  });
   it("reports only continuous confirmation evidence and clears it on low confidence", () => {
     const b = new SentenceBuilder();
     for (let t = 0; t <= 1000; t += 100) b.push({ label: "L", kind: "letter", confidence: 0.7 }, t);
