@@ -57,6 +57,8 @@ function Translator() {
   const [current, setCurrent] = useState<Classification | null>(null);
   const [handsView, setHandsView] = useState<{ side: string; cls: Classification }[]>([]);
   const smoothRef = useRef<{ x: number; y: number; z?: number }[][]>([]);
+  const identitiesRef = useRef("");
+  const videoTimeRef = useRef(-1);
   const [text, setText] = useState("");
   const [response, setResponse] = useState("");
   const speech = useTranslationSpeech(text);
@@ -73,6 +75,11 @@ function Translator() {
     setStatus("idle");
     setCurrent(null);
     setHandsView([]);
+    builder.current.resetTracking();
+    tracksRef.current.clear();
+    smoothRef.current = [];
+    identitiesRef.current = "";
+    videoTimeRef.current = -1;
   }, []);
 
   useEffect(() => () => stop(), [stop]);
@@ -80,19 +87,31 @@ function Translator() {
   const loop = useCallback(() => {
     const v = videoRef.current, c = canvasRef.current, lmk = landmarkerRef.current;
     if (!v || !c || !lmk || !streamRef.current) return;
-    if (v.readyState >= 2) {
+    if (v.readyState >= 2 && v.currentTime !== videoTimeRef.current) {
+      videoTimeRef.current = v.currentTime;
       const now = performance.now();
       const res = lmk.detectForVideo(v, now);
       c.width = v.videoWidth; c.height = v.videoHeight;
-      const ctx = c.getContext("2d")!;
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
       ctx.clearRect(0, 0, c.width, c.height);
       type P = { x: number; y: number; z?: number };
       const raw = (res.landmarks ?? []) as P[][];
+      const identities = raw.map((_, i) => res.handedness?.[i]?.[0]?.categoryName ?? `Hand ${i + 1}`).join(",");
+      if (identitiesRef.current !== identities) {
+        smoothRef.current = [];
+        tracksRef.current.clear();
+        builder.current.resetTracking();
+        identitiesRef.current = identities;
+      }
       // Light temporal smoothing per hand to reduce jitter between frames.
       const hands = raw.map((h, i) => {
         const prev = smoothRef.current[i];
         const sm = prev && prev.length === h.length
-          ? h.map((p, j) => ({ x: p.x * 0.6 + prev[j]!.x * 0.4, y: p.y * 0.6 + prev[j]!.y * 0.4, z: (p.z ?? 0) * 0.6 + (prev[j]!.z ?? 0) * 0.4 }))
+          ? h.map((p, j) => {
+            const previous = prev[j];
+            return previous ? { x: p.x * 0.6 + previous.x * 0.4, y: p.y * 0.6 + previous.y * 0.4, z: (p.z ?? 0) * 0.6 + (previous.z ?? 0) * 0.4 } : p;
+          })
           : h;
         return sm;
       });
@@ -101,8 +120,8 @@ function Translator() {
       const W = c.width, H = c.height;
       const px = (p: { x: number; y: number }) => ({ x: p.x * W, y: p.y * H });
       let body: Body | null = null;
-      const pose = poseRef.current?.detectForVideo(v, now)?.landmarks?.[0] as { x: number; y: number }[] | undefined;
-      if (pose && pose[11] && pose[12] && pose[9] && pose[10] && pose[2] && pose[5]) {
+      const pose = poseRef.current?.detectForVideo(v, now)?.landmarks?.[0] as { x: number; y: number; visibility?: number; presence?: number }[] | undefined;
+      if (pose && [11, 12, 9, 10, 2, 5].every((i) => (pose[i]?.visibility ?? 0) >= 0.7 && (pose[i]?.presence ?? 1) >= 0.7) && pose[11] && pose[12] && pose[9] && pose[10] && pose[2] && pose[5]) {
         const ls = px(pose[11]), rs = px(pose[12]);
         const mouth = { x: (pose[9].x + pose[10].x) / 2 * W, y: (pose[9].y + pose[10].y) / 2 * H };
         const eye = { x: (pose[2].x + pose[5].x) / 2 * W, y: (pose[2].y + pose[5].y) / 2 * H };
@@ -121,61 +140,71 @@ function Translator() {
         const colors = ["rgba(99,230,213,0.9)", "rgba(64,183,255,0.9)"];
         const results = hands.map((hand, i) => {
           if (settings.showLandmarks) {
-            ctx.strokeStyle = colors[i % 2]!; ctx.lineWidth = 4;
+            ctx.strokeStyle = colors[i % 2] ?? colors[0] ?? ""; ctx.lineWidth = 4;
             for (const [a, b] of CONNECTIONS) {
-              const pa = hand[a]!, pb = hand[b]!;
+              const pa = hand[a], pb = hand[b];
+              if (!pa || !pb) continue;
               ctx.beginPath(); ctx.moveTo(pa.x * c.width, pa.y * c.height); ctx.lineTo(pb.x * c.width, pb.y * c.height); ctx.stroke();
             }
             ctx.fillStyle = "rgba(121,87,255,1)";
             for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
           }
           const side = (res.handedness?.[i]?.[0]?.categoryName as string | undefined) ?? `Hand ${i + 1}`;
-          return { side, cls: classifyHandshape(hand) };
+          // MediaPipe x/z use image width; y uses image height. Equalize axes.
+          return { side, cls: classifyHandshape(hand.map((p) => ({ ...p, x: p.x * W / H, z: (p.z ?? 0) * W / H }))) };
         });
         setHandsView(results);
         // Movement + body-location signs (Please, Thank you, …) per hand.
-        let motionHit: { label: string; confidence: number } | null = null;
+        let motionHit: { label: string; confidence: number; source: string } | null = null;
         let anyInZone = false;
         if (body) {
           const seen = new Set<string>();
           hands.forEach((hand, i) => {
-            const key = results[i]!.side + i;
+            const result = results[i];
+            const tip = hand[12], indexTip = hand[8];
+            if (!result || !tip || !indexTip || !body) return;
+            const key = result.side + i;
             seen.add(key);
-            const l = results[i]!.cls.label;
+            const l = result.cls.confidence >= Math.max(0.7, settings.threshold) ? result.cls.label : null;
             const shape: Shape = l === "B" || l === "5" ? "open" : l === "A" || l === "S" ? "fist" : l === "D" ? "index" : "other";
             const palmIdx = [0, 5, 9, 13, 17];
-            const palm = { x: palmIdx.reduce((a, j) => a + hand[j]!.x, 0) / 5 * W, y: palmIdx.reduce((a, j) => a + hand[j]!.y, 0) / 5 * H };
-            const f: Frame = { t: now, shape, palm, tip: px(hand[12]!), indexTip: px(hand[8]!), body: body! };
+            const palm = { x: palmIdx.reduce((a, j) => a + (hand[j]?.x ?? 0), 0) / 5 * W, y: palmIdx.reduce((a, j) => a + (hand[j]?.y ?? 0), 0) / 5 * H };
+            const f: Frame = { t: now, shape, palm, tip: px(tip), indexTip: px(indexTip), body };
             const tr = (tracksRef.current.get(key) ?? []).filter((x) => now - x.t < 1200);
             tr.push(f);
             tracksRef.current.set(key, tr);
             if (inBodyZone(f)) anyInZone = true;
             const m = detectMotionSign(tr);
-            if (m && (!motionHit || m.confidence > motionHit.confidence)) { motionHit = m; tracksRef.current.set(key, []); }
+            if (m && (!motionHit || m.confidence > motionHit.confidence)) motionHit = { ...m, source: key };
           });
           for (const k of tracksRef.current.keys()) if (!seen.has(k)) tracksRef.current.delete(k);
-        }
+        } else tracksRef.current.clear();
         if (motionHit) {
-          const mh = motionHit as { label: string; confidence: number };
-          if (builder.current.commitWord(mh.label, mh.confidence, now)) {
+          const mh = motionHit as { label: string; confidence: number; source: string };
+          const candidate: Classification = { label: mh.label, kind: "word", confidence: mh.confidence };
+          setCurrent(candidate);
+          const r = builder.current.push(candidate, now, mh.source);
+          setStatus(r.status);
+          if (r.committed) {
             setText(builder.current.text);
             setLastWord(mh.label);
-            setCurrent({ label: mh.label, kind: "word", confidence: mh.confidence });
-            setStatus("recognized");
-          } else if (mh.confidence < settings.threshold) setStatus("low-confidence");
+          }
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
         if (anyInZone) {
           // Hand is at the face/chest: wait for a full body sign instead of reading letters.
+          builder.current.push({ label: null, kind: "word", confidence: 0 }, now);
+          setCurrent(null);
           setStatus("tracking");
           rafRef.current = requestAnimationFrame(loop);
           return;
         }
         // The sentence uses whichever hand shows the most confident recognized sign.
-        const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0]!.cls;
-        setCurrent(best);
-        const r = builder.current.push(best, now);
+        const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0];
+        if (!best) return;
+        setCurrent(best.cls);
+        const r = builder.current.push(best.cls, now, best.side);
         setStatus(r.status);
         if (r.committed) setText(builder.current.text);
       } else {
@@ -188,9 +217,11 @@ function Translator() {
       // Cheap brightness check every ~60 frames
       if (Math.floor(now / 1000) % 3 === 0 && Math.random() < 0.05) {
         const s = document.createElement("canvas"); s.width = 32; s.height = 24;
-        const sc = s.getContext("2d")!; sc.drawImage(v, 0, 0, 32, 24);
+        const sc = s.getContext("2d");
+        if (!sc) return;
+        sc.drawImage(v, 0, 0, 32, 24);
         const d = sc.getImageData(0, 0, 32, 24).data; let sum = 0;
-        for (let i = 0; i < d.length; i += 4) sum += d[i]! + d[i + 1]! + d[i + 2]!;
+        for (let i = 0; i < d.length; i += 4) sum += (d[i] ?? 0) + (d[i + 1] ?? 0) + (d[i + 2] ?? 0);
         setLowLight(sum / (d.length / 4) / 3 < 50);
       }
     }
@@ -202,18 +233,24 @@ function Translator() {
       setCam("unavailable"); setErrMsg("Your browser doesn't support camera access. Try the latest Chrome, Safari or Edge."); return;
     }
     cancelAnimationFrame(rafRef.current);
+    builder.current.resetTracking();
+    tracksRef.current.clear();
+    smoothRef.current = [];
+    identitiesRef.current = "";
+    videoTimeRef.current = -1;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     setCam("requesting");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 720 }, height: { ideal: 960 } }, audio: false });
       streamRef.current = stream;
-      const v = videoRef.current!;
+      const v = videoRef.current;
+      if (!v) { stream.getTracks().forEach((t) => t.stop()); return; }
       v.srcObject = stream;
       await v.play();
       if (!landmarkerRef.current) {
         setCam("loading-model");
         const { FilesetResolver, HandLandmarker, PoseLandmarker } = await import("@mediapipe/tasks-vision");
-        const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+        const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.2/wasm");
         landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
           runningMode: "VIDEO",

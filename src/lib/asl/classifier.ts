@@ -20,17 +20,18 @@ const d = (a: Landmark, b: Landmark) => Math.hypot(a.x - b.x, a.y - b.y);
 const clamp = (v: number) => Math.max(0, Math.min(1, v));
 
 export function classifyHandshape(input: Landmark[]): Classification {
-  const lm = (i: number) => input[i]!;
-  if (input.length < 21) return { label: null, kind: "letter", confidence: 0 };
+  if (input.length !== 21 || input.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y) || (p.z !== undefined && !Number.isFinite(p.z)))) return { label: null, kind: "letter", confidence: 0 };
+  const lm = (i: number): Landmark => input[i] ?? { x: 0, y: 0 };
+  if (d(lm(0), lm(9)) < 1e-4) return { label: null, kind: "letter", confidence: 0 };
   const palm = d(lm(0), lm(9)) || 1e-6;
 
   // Combine two cues per finger: joint straightness (camera-angle robust) and
   // tip-vs-PIP distance from the wrist. Uses 3D coordinates when available.
   const straight = (mcp: number, pip: number, tip: number) => {
     const a = lm(mcp), b = lm(pip), c = lm(tip);
-    const v1 = [b.x - a.x, b.y - a.y, (b.z ?? 0) - (a.z ?? 0)];
-    const v2 = [c.x - b.x, c.y - b.y, (c.z ?? 0) - (b.z ?? 0)];
-    const dot = v1[0]! * v2[0]! + v1[1]! * v2[1]! + v1[2]! * v2[2]!;
+    const v1: [number, number, number] = [b.x - a.x, b.y - a.y, (b.z ?? 0) - (a.z ?? 0)];
+    const v2: [number, number, number] = [c.x - b.x, c.y - b.y, (c.z ?? 0) - (b.z ?? 0)];
+    const dot = v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
     const n = Math.hypot(...v1) * Math.hypot(...v2) || 1e-6;
     return dot / n; // 1 = straight, <0 = folded back
   };
@@ -44,6 +45,8 @@ export function classifyHandshape(input: Landmark[]): Classification {
   const ext = scores.map((s) => s > 0.5);
   // Certainty: how decisively each finger is open/closed.
   const certainty = scores.reduce((acc, s) => acc + Math.abs(s - 0.5) * 2, 0) / scores.length;
+  // One ambiguous finger must not be masked by four confident fingers.
+  const weakest = Math.min(...scores.map((s) => Math.abs(s - 0.5) * 2));
 
   // O: all fingertips gathered at the thumb tip.
   const tipsToThumb = [8, 12, 16, 20].map((t) => d(lm(t), lm(4)) / palm);
@@ -80,5 +83,5 @@ export function classifyHandshape(input: Landmark[]): Classification {
     case "01111": label = "B"; break;
     case "11111": label = "5"; break;
   }
-  return { label, kind, confidence: label ? certainty : certainty * 0.5 };
+  return { label, kind, confidence: label ? Math.min(certainty, 0.5 + weakest * 0.5) : certainty * 0.5 };
 }
