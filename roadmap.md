@@ -1,6 +1,10 @@
 # Full ASL phrases and movements
 - [ ] Add broader phrase and movement recognition; blocked on a verified trained ASL sequence model and signing-video validation data, not additional handshape rules.
 
+# Inline gesture transitions
+- [ ] Show tentative text inline with final translation.
+- [ ] Accept the prior tentative guess on a different detected sign in free conversation; retain guided-practice gating, test transitions and camera resets.
+
 # Moving gesture matching
 - [x] Improve continuous moving-gesture matching: chest-height Yes uses body-relative cumulative reversals, supports 10–120 fps samples, rejects jitter/body shifts, and retains Sorry precedence. Motion requires 600ms and six samples rather than twelve; no confirmation thresholds lowered. 54 ASL tests pass; simulated moving-camera flow shows tentative Yes before gated text, then clears stale suggestions when motion stops. Physical-signing accuracy remains unverified.
 - [x] User chose tentative suggestions strictly above 65%, separate from Live Translation and speech. Handshape confidence caps movement confidence; 70% for over two seconds still gates every translation, and experimental two-hand practice keeps its original confidence floor.
