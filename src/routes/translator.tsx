@@ -47,6 +47,8 @@ function Translator() {
   const [errMsg, setErrMsg] = useState("");
   const [status, setStatus] = useState<BuilderStatus>("idle");
   const [current, setCurrent] = useState<Classification | null>(null);
+  const [handsView, setHandsView] = useState<{ side: string; cls: Classification }[]>([]);
+  const smoothRef = useRef<{ x: number; y: number; z?: number }[][]>([]);
   const [text, setText] = useState("");
   const [lowLight, setLowLight] = useState(false);
 
@@ -60,6 +62,7 @@ function Translator() {
     setCam("off");
     setStatus("idle");
     setCurrent(null);
+    setHandsView([]);
   }, []);
 
   useEffect(() => () => stop(), [stop]);
@@ -73,23 +76,41 @@ function Translator() {
       c.width = v.videoWidth; c.height = v.videoHeight;
       const ctx = c.getContext("2d")!;
       ctx.clearRect(0, 0, c.width, c.height);
-      const hand = res.landmarks?.[0] as { x: number; y: number }[] | undefined;
-      if (hand) {
-        if (settings.showLandmarks) {
-          ctx.strokeStyle = "rgba(99,230,213,0.9)"; ctx.lineWidth = 4;
-          for (const [a, b] of CONNECTIONS) {
-            const pa = hand[a]!, pb = hand[b]!;
-            ctx.beginPath(); ctx.moveTo(pa.x * c.width, pa.y * c.height); ctx.lineTo(pb.x * c.width, pb.y * c.height); ctx.stroke();
+      type P = { x: number; y: number; z?: number };
+      const raw = (res.landmarks ?? []) as P[][];
+      // Light temporal smoothing per hand to reduce jitter between frames.
+      const hands = raw.map((h, i) => {
+        const prev = smoothRef.current[i];
+        const sm = prev && prev.length === h.length
+          ? h.map((p, j) => ({ x: p.x * 0.6 + prev[j]!.x * 0.4, y: p.y * 0.6 + prev[j]!.y * 0.4, z: (p.z ?? 0) * 0.6 + (prev[j]!.z ?? 0) * 0.4 }))
+          : h;
+        return sm;
+      });
+      smoothRef.current = hands;
+      if (hands.length) {
+        const colors = ["rgba(99,230,213,0.9)", "rgba(64,183,255,0.9)"];
+        const results = hands.map((hand, i) => {
+          if (settings.showLandmarks) {
+            ctx.strokeStyle = colors[i % 2]!; ctx.lineWidth = 4;
+            for (const [a, b] of CONNECTIONS) {
+              const pa = hand[a]!, pb = hand[b]!;
+              ctx.beginPath(); ctx.moveTo(pa.x * c.width, pa.y * c.height); ctx.lineTo(pb.x * c.width, pb.y * c.height); ctx.stroke();
+            }
+            ctx.fillStyle = "rgba(121,87,255,1)";
+            for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
           }
-          ctx.fillStyle = "rgba(121,87,255,1)";
-          for (const p of hand) { ctx.beginPath(); ctx.arc(p.x * c.width, p.y * c.height, 5, 0, 7); ctx.fill(); }
-        }
-        const cls = classifyHandshape(hand);
-        setCurrent(cls);
-        const r = builder.current.push(cls, now);
+          const side = (res.handedness?.[i]?.[0]?.categoryName as string | undefined) ?? `Hand ${i + 1}`;
+          return { side, cls: classifyHandshape(hand) };
+        });
+        setHandsView(results);
+        // The sentence uses whichever hand shows the most confident recognized sign.
+        const best = [...results].sort((a, b) => (b.cls.label ? 1 : 0) - (a.cls.label ? 1 : 0) || b.cls.confidence - a.cls.confidence)[0]!.cls;
+        setCurrent(best);
+        const r = builder.current.push(best, now);
         setStatus(r.status);
         if (r.committed) setText(builder.current.text);
       } else {
+        setHandsView([]);
         setCurrent(null);
         const r = builder.current.push(null, now);
         setStatus(r.status);
@@ -127,7 +148,10 @@ function Translator() {
         landmarkerRef.current = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
           runningMode: "VIDEO",
-          numHands: 1,
+          numHands: 2,
+          minHandDetectionConfidence: 0.6,
+          minHandPresenceConfidence: 0.6,
+          minTrackingConfidence: 0.5,
         });
       }
       setCam("on");
@@ -177,10 +201,15 @@ function Translator() {
               <span className="relative flex h-2 w-2"><span className="absolute h-2 w-2 animate-ping rounded-full bg-current opacity-60" /><span className="h-2 w-2 rounded-full bg-current" /></span>
               {statusInfo[status].label}
             </div>
-            {current?.label && (
-              <div className="absolute right-4 top-4 rounded-2xl bg-card px-3 py-1.5 text-center shadow-card">
-                <div className="text-xl font-extrabold leading-tight">{current.label}</div>
-                <div className="text-[10px] font-semibold text-muted-foreground">{conf}%</div>
+            {handsView.length > 0 && (
+              <div className="absolute right-4 top-4 flex flex-col gap-2" aria-label="Detected hands">
+                {handsView.map((h, i) => (
+                  <div key={i} className="min-w-16 rounded-2xl bg-card px-3 py-1.5 text-center shadow-card">
+                    <div className="text-[10px] font-bold uppercase text-muted-foreground">{h.side}</div>
+                    <div className="text-xl font-extrabold leading-tight">{h.cls.label ?? "?"}</div>
+                    <div className="text-[10px] font-semibold text-muted-foreground">{h.cls.label ? `${Math.round(h.cls.confidence * 100)}%` : "unknown"}</div>
+                  </div>
+                ))}
               </div>
             )}
             {lowLight && (
@@ -267,7 +296,7 @@ function Translator() {
         <section className="rounded-3xl border border-border p-5 text-sm">
           <p className="font-bold">What Signa recognizes today</p>
           <p className="mt-1 text-muted-foreground">
-            This MVP reads static ASL handshapes — not full ASL sentences, movement signs or facial grammar. Hold each sign still for about half a second; lower your hand briefly to add a space or repeat a letter.
+            This MVP reads static ASL handshapes — not full ASL sentences, movement signs or facial grammar. Both hands are tracked at once — the clearest sign is used. Hold each sign still for about half a second; lower your hand briefly to add a space or repeat a letter.
           </p>
           <div className="mt-3 flex flex-wrap gap-1.5">
             {SUPPORTED_SIGNS.map((s) => <span key={s} className="rounded-lg bg-primary/10 px-2 py-1 text-xs font-bold text-primary">{s}</span>)}
